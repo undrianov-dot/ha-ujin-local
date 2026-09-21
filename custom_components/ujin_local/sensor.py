@@ -64,7 +64,24 @@ class UjinSignalSensor(UjinEntity, SensorEntity):
         self._attr_unique_id = f"{serial}_{signal_name}"
         self._attr_name = signal_name.replace("-", " ").replace("_", " ").title()
         lower = signal_name.lower()
-        if lower in {"term", "temp", "temperature", "term-sex", "reg-term", "treg"} or "temperature" in lower:
+        if (
+            lower
+            in {
+                "term",
+                "temp",
+                "temperature",
+                "term-sex",
+                "floor-temp",
+                "floor_temperature",
+                "reg-term",
+                "treg",
+                "target-temp",
+                "target_temperature",
+                "set-temp",
+                "setpoint",
+            }
+            or "temperature" in lower
+        ):
             self._attr_device_class = SensorDeviceClass.TEMPERATURE
             self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
         elif lower == "rssi":

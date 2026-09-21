@@ -35,6 +35,25 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(packet.token, "af01fe5b")
         self.assertEqual(packet.signals["rele2"], 1)
 
+    def test_parses_nested_body_packet(self):
+        packet = protocol.parse_packet(
+            b'{"header":{"body":{"id":"114358761","name":"trm",'
+            b'"data":[{"term":"21.5","reg-term":"22.0"}],'
+            b'"token":"nested-token"}}}'
+        )
+        self.assertIsNotNone(packet)
+        self.assertEqual(packet.serial, 114358761)
+        self.assertEqual(packet.model, "trm")
+        self.assertEqual(packet.token, "nested-token")
+        self.assertEqual(packet.signals["term"], "21.5")
+
+    def test_ignores_incomplete_or_unknown_packets(self):
+        self.assertIsNone(protocol.parse_packet(b"not-json"))
+        self.assertIsNone(protocol.parse_packet('{"header":{"id":"unknown"}}'))
+        self.assertIsNone(protocol.parse_packet('{"header":{"id":-1}}'))
+        self.assertIsNone(protocol.parse_packet('{"data":{"term":20}}'))
+        self.assertIsNone(protocol.parse_packet("Discovery"))
+
     def test_builds_compact_command(self):
         payload = protocol.build_management_command(
             114358760, "0fe544a0", 12345, {"reg-term": 25}

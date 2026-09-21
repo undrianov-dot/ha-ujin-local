@@ -72,10 +72,14 @@ class UjinHub:
             return udp_socket
 
         udp_socket = make_socket()
-        await loop.create_datagram_endpoint(
+        transport, _ = await loop.create_datagram_endpoint(
             lambda: _UjinDatagramProtocol(self),
             sock=udp_socket,
         )
+        # connection_made normally assigns this; keep the returned transport
+        # as a fallback for event-loop implementations that call it later.
+        if self.transport is None:
+            self.transport = transport
         _LOGGER.info("Listening for UJIN devices on UDP port %s", self.port)
 
     async def async_stop(self) -> None:
