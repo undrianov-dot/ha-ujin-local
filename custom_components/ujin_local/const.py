@@ -1,7 +1,13 @@
 """Constants for UJIN Local."""
 
+from datetime import timedelta
+
 DOMAIN = "ujin_local"
 DEFAULT_PORT = 30300
+DEVICE_TIMEOUT = timedelta(minutes=5)
+AVAILABILITY_REFRESH_INTERVAL = timedelta(seconds=30)
+COMMAND_ACK_TIMEOUT = timedelta(seconds=5)
+PERSISTED_DEVICES_KEY = "devices"
 PLATFORMS = ["binary_sensor", "climate", "sensor", "switch"]
 
 SIGNAL_DEVICE_ADDED = f"{DOMAIN}_device_added"
