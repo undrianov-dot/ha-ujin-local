@@ -30,6 +30,11 @@ def _is_thermostat(model: str) -> bool:
     return any(marker in lower for marker in THERMOSTAT_MODEL_MARKERS)
 
 
+def _has_thermostat_signals(signals: dict[str, Any]) -> bool:
+    keys = {key.lower() for key in signals}
+    return bool(keys & set(CURRENT_TEMPERATURE_KEYS + TARGET_TEMPERATURE_KEYS))
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -40,7 +45,10 @@ async def async_setup_entry(
 
     @callback
     def add_device(serial: int) -> None:
-        if serial not in entities and _is_thermostat(hub.devices[serial].model):
+        device = hub.devices[serial]
+        if serial not in entities and (
+            _is_thermostat(device.model) or _has_thermostat_signals(device.signals)
+        ):
             entity = UjinThermostat(hub, serial)
             entities[serial] = entity
             async_add_entities([entity])

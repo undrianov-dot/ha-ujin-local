@@ -30,6 +30,17 @@ def _merge_data(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _first_dict(value: Any, keys: tuple[str, ...]) -> dict[str, Any]:
+    """Return the first nested mapping used by known packet envelopes."""
+    if not isinstance(value, dict):
+        return {}
+    for key in keys:
+        nested = value.get(key)
+        if isinstance(nested, dict):
+            return nested
+    return {}
+
+
 def parse_packet(payload: bytes | str) -> ParsedPacket | None:
     """Parse legacy Sapfir and current UJIN packet envelopes."""
     if isinstance(payload, bytes):
@@ -38,7 +49,10 @@ def parse_packet(payload: bytes | str) -> ParsedPacket | None:
     if not payload or payload == "Discovery":
         return None
 
-    decoded = json.loads(payload)
+    try:
+        decoded = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        return None
     if not isinstance(decoded, dict):
         return None
 
@@ -46,35 +60,60 @@ def parse_packet(payload: bytes | str) -> ParsedPacket | None:
     if not isinstance(envelope, dict):
         return None
 
-    serial_raw = envelope.get("id", decoded.get("id"))
+    # A few firmware versions wrap the useful fields in a body/payload object.
+    body = _first_dict(envelope, ("body", "payload", "message"))
+    source = body or envelope
+    serial_raw = source.get("id", envelope.get("id", decoded.get("id")))
     if serial_raw is None:
         return None
-    serial = int(serial_raw)
+    try:
+        serial = int(serial_raw)
+    except (TypeError, ValueError):
+        return None
+    if serial < 0:
+        return None
 
     model = str(
-        envelope.get("devName")
+        source.get("devName")
+        or source.get("dev_name")
+        or source.get("model")
+        or source.get("name")
+        or source.get("type")
+        or envelope.get("devName")
         or envelope.get("dev_name")
         or envelope.get("model")
         or decoded.get("devName")
         or "UJIN device"
     )
-    signals = _merge_data(envelope.get("data"))
+    signals = _merge_data(source.get("data"))
+    if not signals:
+        signals = _merge_data(envelope.get("data"))
     if not signals:
         signals = {
             key: value
-            for key, value in envelope.items()
-            if key not in {"id", "devName", "dev_name", "model", "token", "data"}
+            for key, value in source.items()
+            if key
+            not in {
+                "id",
+                "devName",
+                "dev_name",
+                "model",
+                "name",
+                "type",
+                "token",
+                "data",
+            }
         }
 
-    token_raw = envelope.get("token", decoded.get("token"))
+    token_raw = source.get("token", envelope.get("token", decoded.get("token")))
     if token_raw in (None, ""):
         token_raw = signals.get("token")
     token = str(token_raw) if token_raw not in (None, "") else None
 
     # Some current firmware keeps protocol metadata at the envelope level.
     for key in ("uniq_id", "ver", "rssi", "time"):
-        if key in envelope and key not in signals:
-            signals[key] = envelope[key]
+        if key in source and key not in signals:
+            signals[key] = source[key]
 
     return ParsedPacket(serial=serial, model=model, token=token, signals=signals)
 
