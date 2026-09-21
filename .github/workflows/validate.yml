@@ -1,0 +1,38 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  validate-hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  validate-hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Hassfest validation
+        uses: home-assistant/actions/hassfest@master
+
+  protocol-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Run protocol tests
+        run: python -m unittest discover -s tests -v
+

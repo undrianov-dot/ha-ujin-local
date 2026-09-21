@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a problem with UJIN Local
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Attach Home Assistant diagnostics when possible. Tokens are redacted automatically.
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: UJIN device model and firmware
+      placeholder: ujin-potato-trm-m1, firmware 1.6.0
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      render: text
+

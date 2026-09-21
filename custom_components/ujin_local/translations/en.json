@@ -1,0 +1,16 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "UJIN Local",
+        "description": "Listen for UJIN devices on the local network. Home Assistant must be on the same broadcast network.",
+        "data": {
+          "port": "UDP listen port"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "UJIN Local is already configured."
+    }
+  }
+}

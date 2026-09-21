@@ -1,0 +1,61 @@
+"""Protocol tests that do not require Home Assistant."""
+
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
+import json
+import sys
+import unittest
+
+MODULE_PATH = Path(__file__).parents[1] / "custom_components" / "ujin_local" / "protocol.py"
+SPEC = spec_from_file_location("ujin_protocol", MODULE_PATH)
+protocol = module_from_spec(SPEC)
+assert SPEC and SPEC.loader
+sys.modules[SPEC.name] = protocol
+SPEC.loader.exec_module(protocol)
+
+
+class ProtocolTests(unittest.TestCase):
+    def test_parses_potato_packet(self):
+        packet = protocol.parse_packet(
+            '{"id":114358760,"devName":"ujin-potato-trm-m1",'
+            '"token":"0fe544a0","uniq_id":744562,'
+            '"data":[{"sn":0,"term":23.5,"reg-term":24}]}'
+        )
+        self.assertEqual(packet.serial, 114358760)
+        self.assertEqual(packet.token, "0fe544a0")
+        self.assertEqual(packet.signals["term"], 23.5)
+        self.assertEqual(packet.signals["reg-term"], 24)
+
+    def test_parses_legacy_header_packet(self):
+        packet = protocol.parse_packet(
+            '{"header":{"id":9156095,"devName":"dinrelay_m4",'
+            '"data":{"token":"af01fe5b","rele1":0,"rele2":1}}}'
+        )
+        self.assertEqual(packet.serial, 9156095)
+        self.assertEqual(packet.token, "af01fe5b")
+        self.assertEqual(packet.signals["rele2"], 1)
+
+    def test_builds_compact_command(self):
+        payload = protocol.build_management_command(
+            114358760, "0fe544a0", 12345, {"reg-term": 25}
+        )
+        self.assertEqual(
+            json.loads(payload),
+            {
+                "command": "management",
+                "id": 114358760,
+                "uniq_id": 12345,
+                "token": "0fe544a0",
+                "reg-term": 25,
+            },
+        )
+
+    def test_boolean_encodings(self):
+        self.assertFalse(protocol.value_is_on("0"))
+        self.assertFalse(protocol.value_is_on("closed"))
+        self.assertTrue(protocol.value_is_on("1"))
+        self.assertTrue(protocol.value_is_on(1))
+
+
+if __name__ == "__main__":
+    unittest.main()

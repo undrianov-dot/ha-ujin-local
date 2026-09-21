@@ -1,0 +1,16 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "UJIN Local",
+        "description": "Локальное обнаружение устройств UJIN. Home Assistant должен находиться в той же широковещательной сети.",
+        "data": {
+          "port": "UDP-порт прослушивания"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "UJIN Local уже настроен."
+    }
+  }
+}
