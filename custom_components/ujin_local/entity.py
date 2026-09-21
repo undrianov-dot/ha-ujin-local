@@ -7,9 +7,8 @@ from typing import Any
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
-from .const import DEVICE_TIMEOUT, DOMAIN
+from .const import DOMAIN
 from .hub import UjinDevice, UjinHub
-from .protocol import is_recent
 
 
 class UjinEntity(Entity):
@@ -25,7 +24,7 @@ class UjinEntity(Entity):
 
     @property
     def available(self) -> bool:
-        return is_recent(self.device.last_seen, timeout=DEVICE_TIMEOUT)
+        return True
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
