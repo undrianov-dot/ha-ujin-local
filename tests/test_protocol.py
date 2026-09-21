@@ -84,6 +84,11 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(protocol.is_recent(now.replace(tzinfo=None), now))
         self.assertTrue(protocol.is_recent(now - timedelta(minutes=5), now))
 
+    def test_stale_packets_remain_usable_for_last_value(self):
+        stale_seen = datetime.now(timezone.utc) - timedelta(hours=2)
+        self.assertFalse(protocol.is_recent(stale_seen, datetime.now(timezone.utc)))
+        self.assertIsInstance(stale_seen.isoformat(), str)
+
 
 if __name__ == "__main__":
     unittest.main()

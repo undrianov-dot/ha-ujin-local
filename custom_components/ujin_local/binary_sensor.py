@@ -90,5 +90,5 @@ class UjinBinarySensor(UjinEntity, BinarySensorEntity):
     def available(self) -> bool:
         if self.signal_name == "leak":
             signal_name, _ = self.device.first_signal(LEAK_KEYS)
-            return super().available and signal_name is not None
-        return super().available and self.signal_name in self.device.signals
+            return signal_name is not None
+        return self.signal_name in self.device.signals

@@ -116,4 +116,4 @@ class UjinSignalSensor(UjinEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return super().available and self.signal_name in self.device.signals
+        return self.signal_name in self.device.signals
