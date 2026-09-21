@@ -1,22 +1,58 @@
-"""Diagnostic and measurement sensors for UJIN devices."""
+"""Stable measurement sensors for UJIN devices."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT, UnitOfTemperature
+from homeassistant.const import (
+    LIGHT_LUX,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    UnitOfRatio,
+)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, METADATA_KEYS, SECRET_KEYS, SIGNAL_DEVICE_ADDED, SIGNAL_DEVICE_UPDATED
+from .climate import _is_thermostat
+from .const import (
+    DOMAIN,
+    RELAY_MODEL_MARKERS,
+    RELAY_SENSOR_KEYS,
+    SIGNAL_DEVICE_ADDED,
+    SIGNAL_DEVICE_UPDATED,
+    THERMOSTAT_SENSOR_KEYS,
+)
 from .entity import UjinEntity
 from .hub import UjinHub
 
-_SKIP_VALUES = (dict, list, tuple, set)
+
+@dataclass(frozen=True, slots=True)
+class UjinSensorDescription:
+    name: str
+    device_class: SensorDeviceClass | None = None
+    unit: str | None = None
+    diagnostic: bool = False
+
+
+SENSOR_DESCRIPTIONS = {
+    "co2": UjinSensorDescription(
+        "Carbon dioxide", SensorDeviceClass.CO2, UnitOfRatio.PARTS_PER_MILLION
+    ),
+    "air-iaq": UjinSensorDescription("Indoor air quality"),
+    "lux": UjinSensorDescription(
+        "Illuminance", SensorDeviceClass.ILLUMINANCE, LIGHT_LUX
+    ),
+    "rssi": UjinSensorDescription(
+        "Signal strength",
+        SensorDeviceClass.SIGNAL_STRENGTH,
+        SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+        True,
+    ),
+}
 
 
 async def async_setup_entry(
@@ -25,24 +61,24 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     hub: UjinHub = hass.data[DOMAIN][entry.entry_id]
-    added: set[tuple[int, str]] = set()
     entities: dict[tuple[int, str], UjinSignalSensor] = {}
 
     @callback
     def sync_device(serial: int) -> None:
         device = hub.devices[serial]
+        lower_model = device.model.lower()
+        keys: tuple[str, ...] = ()
+        if _is_thermostat(device.model):
+            keys = THERMOSTAT_SENSOR_KEYS
+        elif any(marker in lower_model for marker in RELAY_MODEL_MARKERS):
+            keys = RELAY_SENSOR_KEYS
+
         new_entities: list[UjinSignalSensor] = []
-        for key, value in device.signals.items():
+        for key in keys:
             identity = (serial, key)
-            if (
-                identity in added
-                or key in METADATA_KEYS
-                or key in SECRET_KEYS
-                or isinstance(value, _SKIP_VALUES)
-            ):
+            if identity in entities:
                 continue
             entity = UjinSignalSensor(hub, serial, key)
-            added.add(identity)
             entities[identity] = entity
             new_entities.append(entity)
         if new_entities:
@@ -53,8 +89,12 @@ async def async_setup_entry(
 
     for serial in list(hub.devices):
         sync_device(serial)
-    entry.async_on_unload(async_dispatcher_connect(hass, SIGNAL_DEVICE_ADDED, sync_device))
-    entry.async_on_unload(async_dispatcher_connect(hass, SIGNAL_DEVICE_UPDATED, sync_device))
+    entry.async_on_unload(
+        async_dispatcher_connect(hass, SIGNAL_DEVICE_ADDED, sync_device)
+    )
+    entry.async_on_unload(
+        async_dispatcher_connect(hass, SIGNAL_DEVICE_UPDATED, sync_device)
+    )
 
 
 class UjinSignalSensor(UjinEntity, SensorEntity):
@@ -62,36 +102,18 @@ class UjinSignalSensor(UjinEntity, SensorEntity):
         super().__init__(hub, serial)
         self.signal_name = signal_name
         self._attr_unique_id = f"{serial}_{signal_name}"
-        self._attr_name = signal_name.replace("-", " ").replace("_", " ").title()
-        lower = signal_name.lower()
-        if (
-            lower
-            in {
-                "term",
-                "temp",
-                "temperature",
-                "term-sex",
-                "floor-temp",
-                "floor_temperature",
-                "reg-term",
-                "treg",
-                "target-temp",
-                "target_temperature",
-                "set-temp",
-                "setpoint",
-            }
-            or "temperature" in lower
-        ):
-            self._attr_device_class = SensorDeviceClass.TEMPERATURE
-            self._attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-        elif lower == "rssi":
-            self._attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
-            self._attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+        description = SENSOR_DESCRIPTIONS[signal_name]
+        self._attr_name = description.name
+        self._attr_device_class = description.device_class
+        self._attr_native_unit_of_measurement = description.unit
+        if description.diagnostic:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
-        elif lower in {"hum", "humidity"}:
-            self._attr_device_class = SensorDeviceClass.HUMIDITY
-            self._attr_native_unit_of_measurement = PERCENTAGE
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def native_value(self) -> Any:
         return self.device.signals.get(self.signal_name)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.signal_name in self.device.signals

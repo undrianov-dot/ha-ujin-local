@@ -8,6 +8,7 @@ from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -19,6 +20,7 @@ from .const import (
     SIGNAL_DEVICE_UPDATED,
     TARGET_TEMPERATURE_KEYS,
     THERMOSTAT_MODEL_MARKERS,
+    WRITABLE_TARGET_TEMPERATURE_KEYS,
 )
 from .entity import UjinEntity
 from .hub import UjinHub
@@ -96,6 +98,13 @@ class UjinThermostat(UjinEntity, ClimateEntity):
             return None
 
     @property
+    def supported_features(self) -> ClimateEntityFeature:
+        signal_name, _ = self.device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
+        if signal_name is None:
+            return ClimateEntityFeature(0)
+        return ClimateEntityFeature.TARGET_TEMPERATURE
+
+    @property
     def hvac_action(self) -> HVACAction | None:
         signal_name, value = self.device.first_signal(HEAT_RELAY_KEYS)
         if signal_name is None:
@@ -106,7 +115,9 @@ class UjinThermostat(UjinEntity, ClimateEntity):
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
-        signal_name, _ = self.device.first_signal(TARGET_TEMPERATURE_KEYS)
-        await self.hub.async_send_changes(
-            self.serial, {signal_name or "reg-term": temperature}
-        )
+        signal_name, _ = self.device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
+        if signal_name is None:
+            raise HomeAssistantError(
+                "The thermostat has not advertised a target-temperature signal"
+            )
+        await self.hub.async_send_changes(self.serial, {signal_name: temperature})
