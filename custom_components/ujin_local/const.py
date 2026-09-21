@@ -7,6 +7,7 @@ DEFAULT_PORT = 30300
 DEVICE_TIMEOUT = timedelta(minutes=5)
 AVAILABILITY_REFRESH_INTERVAL = timedelta(seconds=30)
 COMMAND_ACK_TIMEOUT = timedelta(seconds=5)
+PERSISTENCE_INTERVAL = timedelta(seconds=30)
 PERSISTED_DEVICES_KEY = "devices"
 PLATFORMS = ["binary_sensor", "climate", "sensor", "switch"]
 
