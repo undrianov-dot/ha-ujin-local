@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
-from .const import DOMAIN
+from .const import DEVICE_TIMEOUT, DOMAIN
 from .hub import UjinDevice, UjinHub
+from .protocol import is_recent
 
 
 class UjinEntity(Entity):
@@ -19,6 +22,14 @@ class UjinEntity(Entity):
     @property
     def device(self) -> UjinDevice:
         return self.hub.devices[self.serial]
+
+    @property
+    def available(self) -> bool:
+        return is_recent(self.device.last_seen, timeout=DEVICE_TIMEOUT)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"last_seen": self.device.last_seen.isoformat()}
 
     @property
     def device_info(self) -> DeviceInfo:

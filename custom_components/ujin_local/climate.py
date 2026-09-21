@@ -107,4 +107,6 @@ class UjinThermostat(UjinEntity, ClimateEntity):
         if temperature is None:
             return
         signal_name, _ = self.device.first_signal(TARGET_TEMPERATURE_KEYS)
-        self.hub.send_changes(self.serial, {signal_name or "reg-term": temperature})
+        await self.hub.async_send_changes(
+            self.serial, {signal_name or "reg-term": temperature}
+        )

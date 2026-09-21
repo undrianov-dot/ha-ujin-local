@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import json
 from typing import Any
 
@@ -15,6 +16,21 @@ class ParsedPacket:
     model: str
     token: str | None
     signals: dict[str, Any]
+    unique_id: int | str | None = None
+
+
+def is_recent(
+    last_seen: datetime,
+    now: datetime | None = None,
+    timeout: timedelta = timedelta(minutes=5),
+) -> bool:
+    """Return whether a device timestamp is within the availability window."""
+    if last_seen.tzinfo is None:
+        return False
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        return False
+    return current - last_seen <= timeout
 
 
 def _merge_data(value: Any) -> dict[str, Any]:
@@ -110,12 +126,22 @@ def parse_packet(payload: bytes | str) -> ParsedPacket | None:
         token_raw = signals.get("token")
     token = str(token_raw) if token_raw not in (None, "") else None
 
+    unique_id = source.get("uniq_id", source.get("unique_id"))
+    if unique_id is None:
+        unique_id = signals.get("uniq_id", signals.get("unique_id"))
+
     # Some current firmware keeps protocol metadata at the envelope level.
     for key in ("uniq_id", "ver", "rssi", "time"):
         if key in source and key not in signals:
             signals[key] = source[key]
 
-    return ParsedPacket(serial=serial, model=model, token=token, signals=signals)
+    return ParsedPacket(
+        serial=serial,
+        model=model,
+        token=token,
+        signals=signals,
+        unique_id=unique_id,
+    )
 
 
 def build_management_command(

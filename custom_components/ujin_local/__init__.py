@@ -10,7 +10,7 @@ from .hub import UjinHub
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    hub = UjinHub(hass, entry.data.get("port", DEFAULT_PORT))
+    hub = UjinHub(hass, entry, entry.data.get("port", DEFAULT_PORT))
     await hub.async_start()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = hub
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

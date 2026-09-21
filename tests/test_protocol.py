@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 
 MODULE_PATH = Path(__file__).parents[1] / "custom_components" / "ujin_local" / "protocol.py"
 SPEC = spec_from_file_location("ujin_protocol", MODULE_PATH)
@@ -25,6 +26,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(packet.token, "0fe544a0")
         self.assertEqual(packet.signals["term"], 23.5)
         self.assertEqual(packet.signals["reg-term"], 24)
+        self.assertEqual(packet.unique_id, 744562)
 
     def test_parses_legacy_header_packet(self):
         packet = protocol.parse_packet(
@@ -74,6 +76,12 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(protocol.value_is_on("closed"))
         self.assertTrue(protocol.value_is_on("1"))
         self.assertTrue(protocol.value_is_on(1))
+
+    def test_availability_requires_timezone_aware_recent_timestamp(self):
+        now = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
+        self.assertTrue(protocol.is_recent(now - timedelta(minutes=4), now))
+        self.assertFalse(protocol.is_recent(now - timedelta(minutes=6), now))
+        self.assertFalse(protocol.is_recent(now.replace(tzinfo=None), now))
 
 
 if __name__ == "__main__":
