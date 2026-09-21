@@ -82,6 +82,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertTrue(protocol.is_recent(now - timedelta(minutes=4), now))
         self.assertFalse(protocol.is_recent(now - timedelta(minutes=6), now))
         self.assertFalse(protocol.is_recent(now.replace(tzinfo=None), now))
+        self.assertTrue(protocol.is_recent(now - timedelta(minutes=5), now))
 
 
 if __name__ == "__main__":

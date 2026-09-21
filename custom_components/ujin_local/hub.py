@@ -20,6 +20,7 @@ from .const import (
     AVAILABILITY_REFRESH_INTERVAL,
     COMMAND_ACK_TIMEOUT,
     DEVICE_TIMEOUT,
+    PERSISTENCE_INTERVAL,
     PERSISTED_DEVICES_KEY,
     SIGNAL_DEVICE_ADDED,
     SIGNAL_DEVICE_UPDATED,
@@ -73,6 +74,7 @@ class UjinHub:
         self.devices: dict[int, UjinDevice] = {}
         self._availability_unsub: Any = None
         self._pending_commands: dict[int, tuple[int, asyncio.Future[bool]]] = {}
+        self._persisted_devices: dict[int, tuple[str, str, str, datetime]] = {}
         self._restore_devices()
 
     def _restore_devices(self) -> None:
@@ -93,15 +95,30 @@ class UjinHub:
                 last_seen = datetime.now(timezone.utc)
             if last_seen.tzinfo is None:
                 last_seen = last_seen.replace(tzinfo=timezone.utc)
-            self.devices[serial] = UjinDevice(
+            device = UjinDevice(
                 serial=serial,
                 model=str(stored.get("model") or "UJIN device"),
                 ip_address=str(stored.get("ip_address") or ""),
                 token=str(stored["token"]) if stored.get("token") else None,
                 last_seen=last_seen,
             )
+            self.devices[serial] = device
+            self._persisted_devices[serial] = (
+                device.model,
+                device.ip_address,
+                device.token or "",
+                device.last_seen,
+            )
 
     def _persist_device(self, device: UjinDevice) -> None:
+        metadata = (device.model, device.ip_address, device.token or "")
+        previous = self._persisted_devices.get(device.serial)
+        if (
+            previous is not None
+            and previous[:3] == metadata
+            and device.last_seen - previous[3] < PERSISTENCE_INTERVAL
+        ):
+            return
         persisted = {
             str(serial): {
                 "model": item.model,
@@ -114,6 +131,7 @@ class UjinHub:
         data = dict(self.entry.data)
         data[PERSISTED_DEVICES_KEY] = persisted
         self.hass.config_entries.async_update_entry(self.entry, data=data)
+        self._persisted_devices[device.serial] = (*metadata, device.last_seen)
 
     async def async_start(self) -> None:
         loop = asyncio.get_running_loop()
@@ -218,6 +236,10 @@ class UjinHub:
             raise HomeAssistantError("UJIN UDP listener is not running")
         if not device.token:
             raise HomeAssistantError(f"Token for UJIN device {serial} is unavailable")
+        if serial in self._pending_commands:
+            raise HomeAssistantError(
+                f"Another UJIN command for device {serial} is awaiting acknowledgement"
+            )
         unique_id = int(time.time_ns() // 1_000_000 % 100_000_000)
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
