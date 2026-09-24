@@ -15,6 +15,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     CURRENT_TEMPERATURE_KEYS,
+    DEFAULT_TARGET_TEMPERATURE_KEY,
     DOMAIN,
     HEAT_RELAY_KEYS,
     SIGNAL_DEVICE_ADDED,
@@ -96,13 +97,13 @@ class UjinThermostat(UjinEntity, ClimateEntity):
         try:
             return float(value)
         except (TypeError, ValueError):
-            return None
+            # Current Potato thermostat firmware does not advertise its
+            # setpoint. Use the room temperature as the initial UI value so
+            # Home Assistant can still render a usable thermostat control.
+            return self.current_temperature
 
     @property
     def supported_features(self) -> ClimateEntityFeature:
-        signal_name, _ = self.device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
-        if signal_name is None:
-            return ClimateEntityFeature(0)
         return ClimateEntityFeature.TARGET_TEMPERATURE
 
     @property
@@ -116,20 +117,20 @@ class UjinThermostat(UjinEntity, ClimateEntity):
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
+        signal_name, _ = self.device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
+        if signal_name is None:
+            signal_name = DEFAULT_TARGET_TEMPERATURE_KEY
         try:
-            temperature = float(temperature)
+            target = float(temperature)
         except (TypeError, ValueError) as err:
             raise HomeAssistantError("Thermostat temperature must be numeric") from err
-        if not math.isfinite(temperature):
+        if not math.isfinite(target):
             raise HomeAssistantError("Thermostat temperature must be finite")
-        if not self._attr_min_temp <= temperature <= self._attr_max_temp:
+        if not self._attr_min_temp <= target <= self._attr_max_temp:
             raise HomeAssistantError(
                 f"Thermostat temperature must be between "
                 f"{self._attr_min_temp} and {self._attr_max_temp} °C"
             )
-        signal_name, _ = self.device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
-        if signal_name is None:
-            raise HomeAssistantError(
-                "The thermostat has not advertised a target-temperature signal"
-            )
-        await self.hub.async_send_changes(self.serial, {signal_name: temperature})
+        await self.hub.async_send_changes(self.serial, {signal_name: target})
+        self.device.signals[signal_name] = target
+        self.async_write_ha_state()
