@@ -7,6 +7,13 @@
         "data": {
           "port": "UDP listen port"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure UJIN Local",
+        "description": "Update the UDP listen port without removing the integration or its saved device data.",
+        "data": {
+          "port": "UDP listen port"
+        }
       }
     },
     "abort": {
