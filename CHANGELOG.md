@@ -7,6 +7,7 @@
 - Add two switches and two binary inputs for `dinrelay_m4`.
 - Require devices to advertise a setpoint field before enabling temperature control.
 - Require a matching `uniq_id` acknowledgement for control commands.
+- Validate thermostat setpoints before sending UDP management commands.
 - Persist device connection details and refresh availability every 30 seconds.
 - Improve parsing of nested and incomplete UDP envelopes.
 - Fix the Russian README encoding.
