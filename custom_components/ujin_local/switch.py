@@ -76,7 +76,7 @@ class UjinSignalSwitch(UjinEntity, SwitchEntity):
         self._attr_unique_id = f"{serial}_{signal_name}_switch"
         self._attr_name = name
         self._attr_device_class = (
-            SwitchDeviceClass.OUTLET if not is_valve else SwitchDeviceClass.SWITCH
+            SwitchDeviceClass.SWITCH
         )
 
     @property
