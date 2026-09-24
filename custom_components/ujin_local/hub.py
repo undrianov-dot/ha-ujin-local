@@ -46,6 +46,11 @@ class UjinDevice:
         for key in keys:
             if key in self.signals:
                 return key, self.signals[key]
+        normalized = {signal.lower(): signal for signal in self.signals}
+        for key in keys:
+            signal = normalized.get(key.lower())
+            if signal is not None:
+                return signal, self.signals[signal]
         return None, None
 
 

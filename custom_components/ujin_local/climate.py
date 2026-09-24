@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature, HVACAction, HVACMode
@@ -115,6 +116,17 @@ class UjinThermostat(UjinEntity, ClimateEntity):
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
+        try:
+            temperature = float(temperature)
+        except (TypeError, ValueError) as err:
+            raise HomeAssistantError("Thermostat temperature must be numeric") from err
+        if not math.isfinite(temperature):
+            raise HomeAssistantError("Thermostat temperature must be finite")
+        if not self._attr_min_temp <= temperature <= self._attr_max_temp:
+            raise HomeAssistantError(
+                f"Thermostat temperature must be between "
+                f"{self._attr_min_temp} and {self._attr_max_temp} °C"
+            )
         signal_name, _ = self.device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
         if signal_name is None:
             raise HomeAssistantError(

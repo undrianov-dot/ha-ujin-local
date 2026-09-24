@@ -20,11 +20,17 @@ RELAY_MODEL_MARKERS = ("dinrelay", "din-relay")
 
 TARGET_TEMPERATURE_KEYS = (
     "reg-term",
+    "reg_term",
     "treg",
+    "t-reg",
     "target-temp",
     "target_temperature",
     "set-temp",
+    "set_temp",
     "setpoint",
+    "target",
+    "desired-temperature",
+    "desired_temperature",
 )
 WRITABLE_TARGET_TEMPERATURE_KEYS = TARGET_TEMPERATURE_KEYS
 CURRENT_TEMPERATURE_KEYS = (
