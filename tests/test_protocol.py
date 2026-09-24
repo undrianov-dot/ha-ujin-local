@@ -27,6 +27,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(packet.signals["term"], 23.5)
         self.assertEqual(packet.signals["reg-term"], 24)
         self.assertEqual(packet.unique_id, 744562)
+        self.assertEqual(float(packet.signals["reg-term"]), 24.0)
 
     def test_parses_legacy_header_packet(self):
         packet = protocol.parse_packet(
@@ -88,6 +89,15 @@ class ProtocolTests(unittest.TestCase):
         stale_seen = datetime.now(timezone.utc) - timedelta(hours=2)
         self.assertFalse(protocol.is_recent(stale_seen, datetime.now(timezone.utc)))
         self.assertIsInstance(stale_seen.isoformat(), str)
+
+    def test_parses_string_setpoint_from_device_packet(self):
+        packet = protocol.parse_packet(
+            '{"id":114358762,"devName":"ujin-potato-trm-m1",'
+            '"data":[{"term":"20.5","reg-term":"21.5"}]}'
+        )
+        self.assertIsNotNone(packet)
+        self.assertEqual(float(packet.signals["term"]), 20.5)
+        self.assertEqual(float(packet.signals["reg-term"]), 21.5)
 
 
 if __name__ == "__main__":
