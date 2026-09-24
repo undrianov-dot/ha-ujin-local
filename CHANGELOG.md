@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Expose DIN relay channels as switches instead of outlets so Yandex Alice classifies them as switches.
+
+
 ## 0.2.0
 
 - Stable entity set for thermostats, the DIN relay, and the leak controller.
