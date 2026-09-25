@@ -42,15 +42,19 @@ class UjinDevice:
     last_seen: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_available: bool | None = None
 
+    @staticmethod
+    def _normalize_signal_name(key: str) -> str:
+        return key.lower().replace("-", "").replace("_", "").replace(" ", "")
+
     def first_signal(self, keys: tuple[str, ...]) -> tuple[str | None, Any]:
-        for key in keys:
-            if key in self.signals:
-                return key, self.signals[key]
-        normalized = {signal.lower(): signal for signal in self.signals}
-        for key in keys:
-            signal = normalized.get(key.lower())
-            if signal is not None:
-                return signal, self.signals[signal]
+        normalized_keys = {
+            self._normalize_signal_name(key): key for key in keys if isinstance(key, str)
+        }
+        for signal_name, value in self.signals.items():
+            if signal_name in keys:
+                return signal_name, value
+            if self._normalize_signal_name(signal_name) in normalized_keys:
+                return signal_name, value
         return None, None
 
 

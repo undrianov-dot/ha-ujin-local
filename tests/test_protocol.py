@@ -99,6 +99,71 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(float(packet.signals["term"]), 20.5)
         self.assertEqual(float(packet.signals["reg-term"]), 21.5)
 
+    def test_first_signal_ignores_key_format_variants(self):
+        import types
+
+        homeassistant = types.ModuleType("homeassistant")
+        config_entries = types.ModuleType("homeassistant.config_entries")
+        core = types.ModuleType("homeassistant.core")
+        exceptions = types.ModuleType("homeassistant.exceptions")
+        helpers = types.ModuleType("homeassistant.helpers")
+        event = types.ModuleType("homeassistant.helpers.event")
+        dispatcher = types.ModuleType("homeassistant.helpers.dispatcher")
+
+        class ConfigEntry:  # pragma: no cover
+            data = {}
+
+        class HomeAssistant:  # pragma: no cover
+            pass
+
+        def callback(func):
+            return func
+
+        config_entries.ConfigEntry = ConfigEntry
+        core.HomeAssistant = HomeAssistant
+        core.callback = callback
+        exceptions.HomeAssistantError = type("HomeAssistantError", (Exception,), {})
+        event.async_track_time_interval = lambda *args, **kwargs: None
+        dispatcher.async_dispatcher_send = lambda *args, **kwargs: None
+
+        sys.modules["homeassistant"] = homeassistant
+        sys.modules["homeassistant.config_entries"] = config_entries
+        sys.modules["homeassistant.core"] = core
+        sys.modules["homeassistant.exceptions"] = exceptions
+        sys.modules["homeassistant.helpers"] = helpers
+        sys.modules["homeassistant.helpers.event"] = event
+        sys.modules["homeassistant.helpers.dispatcher"] = dispatcher
+
+        repo_root = Path(__file__).parents[1]
+        component_root = repo_root / "custom_components"
+        ujin_root = component_root / "ujin_local"
+        component_pkg = types.ModuleType("custom_components")
+        component_pkg.__path__ = [str(component_root)]
+        ujin_pkg = types.ModuleType("custom_components.ujin_local")
+        ujin_pkg.__path__ = [str(ujin_root)]
+        sys.modules["custom_components"] = component_pkg
+        sys.modules["custom_components.ujin_local"] = ujin_pkg
+
+        hub_path = ujin_root / "hub.py"
+        hub_spec = spec_from_file_location("custom_components.ujin_local.hub", hub_path)
+        hub_module = module_from_spec(hub_spec)
+        assert hub_spec and hub_spec.loader
+        sys.modules[hub_spec.name] = hub_module
+        hub_spec.loader.exec_module(hub_module)
+
+        signal_device = hub_module.UjinDevice(
+            serial=1,
+            model="trm",
+            ip_address="10.0.0.5",
+            signals={"setTemp": 21.0},
+        )
+        self.assertEqual(
+            signal_device.first_signal(("set-temp", "target_temperature"))[0], "setTemp"
+        )
+        self.assertEqual(
+            signal_device.first_signal(("set-temp", "target_temperature"))[1], 21.0
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

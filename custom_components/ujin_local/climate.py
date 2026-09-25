@@ -132,4 +132,5 @@ class UjinThermostat(UjinEntity, ClimateEntity):
             raise HomeAssistantError(
                 "The thermostat has not advertised a target-temperature signal"
             )
+        self.device.signals[signal_name] = temperature
         await self.hub.async_send_changes(self.serial, {signal_name: temperature})
