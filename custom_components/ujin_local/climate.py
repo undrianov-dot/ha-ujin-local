@@ -75,7 +75,7 @@ class UjinThermostat(UjinEntity, ClimateEntity):
     _attr_hvac_mode = HVACMode.HEAT
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _attr_target_temperature_step = 0.5
+    _attr_target_temperature_step = 1
     _attr_min_temp = 5
     _attr_max_temp = 40
 
