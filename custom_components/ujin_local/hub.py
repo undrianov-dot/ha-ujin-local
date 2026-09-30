@@ -28,12 +28,20 @@ from .const import (
     SIGNAL_DEVICE_UPDATED,
     TARGET_TEMPERATURE_KEYS,
     HEAT_RELAY_KEYS,
+    LEAK_KEYS,
+    VALVE_KEYS,
+    RELAY_KEYS,
+    RELAY_INPUT_KEYS,
 )
 from .protocol import ParsedPacket, build_management_command, command_endpoint, is_recent, parse_packet
 
 _LOGGER = logging.getLogger(__name__)
-_PERSISTED_SIGNALS = CURATED_SENSOR_KEYS | frozenset(
-    (*TARGET_TEMPERATURE_KEYS, *HEAT_RELAY_KEYS, "kid-bl", "br-lcd", "ver", "ip", "udpp")
+_CRITICAL_SIGNALS = frozenset(
+    (*TARGET_TEMPERATURE_KEYS, *HEAT_RELAY_KEYS, *LEAK_KEYS, *VALVE_KEYS,
+     *RELAY_KEYS, *RELAY_INPUT_KEYS, "kid-bl", "br-lcd")
+)
+_PERSISTED_SIGNALS = CURATED_SENSOR_KEYS | _CRITICAL_SIGNALS | frozenset(
+    ("ver", "ip", "udpp")
 )
 
 
@@ -88,6 +96,7 @@ class UjinHub:
         self._availability_unsub: Any = None
         self._pending_commands: dict[int, tuple[int, asyncio.Future[bool]]] = {}
         self._persisted_devices: dict[int, tuple[str, str, str, datetime]] = {}
+        self._persisted_critical_signals: dict[int, dict[str, Any]] = {}
         self._restore_devices()
 
     def _restore_devices(self) -> None:
@@ -128,13 +137,22 @@ class UjinHub:
                 device.token or "",
                 device.last_seen,
             )
+            self._persisted_critical_signals[serial] = {
+                key: value for key, value in device.signals.items()
+                if key in _CRITICAL_SIGNALS
+            }
 
     def _persist_device(self, device: UjinDevice) -> None:
         metadata = (device.model, device.ip_address, device.token or "")
         previous = self._persisted_devices.get(device.serial)
+        critical_signals = {
+            key: value for key, value in device.signals.items()
+            if key in _CRITICAL_SIGNALS
+        }
         if (
             previous is not None
             and previous[:3] == metadata
+            and self._persisted_critical_signals.get(device.serial) == critical_signals
             and device.last_seen - previous[3] < PERSISTENCE_INTERVAL
         ):
             return
@@ -153,6 +171,7 @@ class UjinHub:
         data[PERSISTED_DEVICES_KEY] = persisted
         self.hass.config_entries.async_update_entry(self.entry, data=data)
         self._persisted_devices[device.serial] = (*metadata, device.last_seen)
+        self._persisted_critical_signals[device.serial] = critical_signals
 
     async def async_start(self) -> None:
         loop = asyncio.get_running_loop()
@@ -286,4 +305,3 @@ class UjinHub:
                 self._pending_commands.pop(serial, None)
             if not future.done():
                 future.cancel()
-

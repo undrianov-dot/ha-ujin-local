@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -36,6 +36,25 @@ def _is_thermostat(model: str) -> bool:
 def _has_thermostat_signals(signals: dict[str, Any]) -> bool:
     keys = {key.lower() for key in signals}
     return bool(keys & set(CURRENT_TEMPERATURE_KEYS + TARGET_TEMPERATURE_KEYS))
+
+
+async def async_set_setpoint(hub: UjinHub, serial: int, temperature: Any) -> None:
+    """Shared, acknowledged whole-degree command for climate and number controls."""
+    device = hub.devices[serial]
+    signal_name, _ = device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
+    if signal_name is None:
+        signal_name = (
+            "treg" if "potato-trm" in device.model.lower()
+            else DEFAULT_TARGET_TEMPERATURE_KEY
+        )
+    try:
+        target = whole_degree(temperature, 5, 40)
+    except ValueError as err:
+        raise HomeAssistantError(str(err)) from err
+    await hub.async_send_changes(serial, {signal_name: target})
+    device.signals[signal_name] = target
+    hub._persist_device(device)
+    async_dispatcher_send(hub.hass, SIGNAL_DEVICE_UPDATED, serial)
 
 
 async def async_setup_entry(
@@ -121,17 +140,5 @@ class UjinThermostat(UjinEntity, ClimateEntity):
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
-        signal_name, _ = self.device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
-        if signal_name is None:
-            signal_name = (
-                "treg" if "potato-trm" in self.device.model.lower()
-                else DEFAULT_TARGET_TEMPERATURE_KEY
-            )
-        try:
-            target = whole_degree(temperature, self.min_temp, self.max_temp)
-        except ValueError as err:
-            raise HomeAssistantError(str(err)) from err
-        await self.hub.async_send_changes(self.serial, {signal_name: target})
-        self.device.signals[signal_name] = target
+        await async_set_setpoint(self.hub, self.serial, temperature)
         self.async_write_ha_state()
-

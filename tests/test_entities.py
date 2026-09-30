@@ -41,7 +41,9 @@ def load_modules():
     module("homeassistant")
     module("homeassistant.components")
     module("homeassistant.components.climate", ClimateEntity=Climate, ClimateEntityFeature=Features, HVACAction=HVAC, HVACMode=HVAC)
-    module("homeassistant.components.number", NumberEntity=Entity, NumberMode=SimpleNamespace(SLIDER="slider"))
+    module("homeassistant.components.number", NumberEntity=Entity, NumberMode=SimpleNamespace(SLIDER="slider", BOX="box"))
+    module("homeassistant.components.binary_sensor", BinarySensorEntity=Entity,
+           BinarySensorDeviceClass=SimpleNamespace(MOISTURE="moisture", CONNECTIVITY="connectivity"))
     module("homeassistant.components.switch", SwitchEntity=Entity, SwitchDeviceClass=SimpleNamespace(SWITCH="switch"))
     module("homeassistant.components.sensor", SensorEntity=Entity, SensorDeviceClass=SimpleNamespace(
         TEMPERATURE="temperature", HUMIDITY="humidity", ATMOSPHERIC_PRESSURE="atmospheric_pressure",
@@ -66,7 +68,7 @@ def load_modules():
     sys.modules[package.__name__] = package
     loaded = {}
     try:
-        for name in ("const", "protocol", "hub", "entity", "climate", "number", "switch", "sensor"):
+        for name in ("const", "protocol", "hub", "entity", "climate", "number", "switch", "sensor", "binary_sensor"):
             spec = importlib.util.spec_from_file_location(f"{package.__name__}.{name}", ROOT / f"{name}.py")
             item = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = item
@@ -170,8 +172,9 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({item.signal_name for item in sensors}, {"term", "term-sex", "lux"})
         numbers = []
         await MODULES["number"].async_setup_entry(hass, entry, numbers.extend)
-        self.assertEqual(len(numbers), 1)
-        self.assertEqual(numbers[0].native_value, 40)
+        self.assertEqual(len(numbers), 2)
+        brightness = next(item for item in numbers if isinstance(item, MODULES["number"].UjinBrightness))
+        self.assertEqual(brightness.native_value, 40)
         switches = []
         await MODULES["switch"].async_setup_entry(hass, entry, switches.extend)
         self.assertEqual([item.signal_name for item in switches], ["kid-bl"])
@@ -179,14 +182,89 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         async def send(serial, changes):
             commands.append(changes)
         hub.async_send_changes = send
-        await numbers[0].async_set_native_value(41)
+        await brightness.async_set_native_value(41)
         await switches[0].async_turn_on()
         self.assertEqual(commands, [{"br-lcd": 41}, {"kid-bl": 1}])
-        self.assertEqual(numbers[0].native_value, 40)  # no optimistic configuration
+        self.assertEqual(brightness.native_value, 40)  # no optimistic configuration
         with self.assertRaises(RuntimeError):
-            await numbers[0].async_set_native_value(100.5)
+            await brightness.async_set_native_value(100.5)
+
+    async def test_absolute_setpoint_accepts_owner_value_without_initial_telemetry(self):
+        hub, updates = self.make_hub()
+        device = hub.devices[4187268204]
+        device.signals = {"term": 27.2}
+        number = MODULES["number"].UjinSetpoint(hub, device.serial)
+        climate = MODULES["climate"].UjinThermostat(hub, device.serial)
+        self.assertTrue(number.available)
+        self.assertIsNone(number.native_value)
+        self.assertEqual(number._attr_native_step, 1)
+        self.assertEqual(number._attr_mode, "box")
+        commands = []
+        async def send(serial, changes):
+            commands.append(changes)
+        hub.async_send_changes = send
+        await number.async_set_native_value(23.7)
+        self.assertEqual(commands, [{"treg": 24}])
+        self.assertEqual(number.native_value, 24)
+        self.assertEqual(climate.target_temperature, 24)
+        restored = hub_module.UjinHub(hub.hass, SimpleNamespace(data=updates[-1]["data"]), 9999)
+        self.assertEqual(restored.devices[device.serial].signals["treg"], 24)
+        for value in (4.9, 40.1, float("nan"), float("inf")):
+            with self.assertRaises(RuntimeError):
+                await number.async_set_native_value(value)
+        self.assertEqual(len(commands), 1)
+        device.token = None
+        self.assertFalse(number.available)
+
+    async def test_failed_setpoint_is_not_displayed_or_persisted(self):
+        hub, updates = self.make_hub()
+        device = hub.devices[4187268204]
+        number = MODULES["number"].UjinSetpoint(hub, device.serial)
+        async def fail(serial, changes):
+            raise RuntimeError("no acknowledgement")
+        hub.async_send_changes = fail
+        with self.assertRaises(RuntimeError):
+            await number.async_set_native_value(24)
+        self.assertIsNone(number.native_value)
+        self.assertEqual(updates, [])
+
+    async def test_valve_and_leak_states_survive_restart_and_heartbeat_only_packets(self):
+        hub, updates = self.make_hub()
+        serial = 4187322636
+        device = hub_module.UjinDevice(serial, "ujin-potato-ld-m1", "192.168.1.12", token="dummy")
+        hub.devices[serial] = device
+        device.signals = {"rele-w": 1, "leak": 0, "password": "not-a-cached-signal"}
+        hub._persist_device(device)
+        device.signals["leak"] = 1
+        # Critical state changes must bypass the 30-second measurement throttle.
+        hub._persist_device(device)
+        self.assertEqual(len(updates), 2)
+        stored = updates[-1]["data"]["devices"][str(serial)]["signals"]
+        self.assertEqual(stored, {"rele-w": 1, "leak": 1})
+        restored = hub_module.UjinHub(hub.hass, SimpleNamespace(data=updates[-1]["data"]), 9999)
+        restored.handle_datagram(json.dumps({"id": serial, "data": {"time": 1234}}).encode(), (device.ip_address, 30300))
+        self.assertEqual(restored.devices[serial].signals["rele-w"], 1)
+        self.assertEqual(restored.devices[serial].signals["leak"], 1)
+        leak = MODULES["binary_sensor"].UjinBinarySensor(restored, serial, "leak", "Leak", "moisture")
+        self.assertTrue(leak.available)
+        self.assertTrue(leak.is_on)
+        restored.devices[serial].last_seen -= timedelta(minutes=6)
+        self.assertFalse(leak.available)
+
+    async def test_connection_is_separate_from_unknown_controller_state(self):
+        hub, _ = self.make_hub()
+        serial = 4187322636
+        hub.devices[serial] = hub_module.UjinDevice(serial, "ujin-potato-ld-m1", "192.168.1.12")
+        connection = MODULES["binary_sensor"].UjinBinarySensor(hub, serial, "connectivity", "Connection", "connectivity")
+        leak = MODULES["binary_sensor"].UjinBinarySensor(hub, serial, "leak", "Leak", "moisture")
+        self.assertTrue(connection.available)
+        self.assertTrue(connection.is_on)
+        self.assertFalse(leak.available)
+        self.assertIsNone(leak.is_on)
+        hub.devices[serial].last_seen -= timedelta(minutes=6)
+        self.assertTrue(connection.available)
+        self.assertFalse(connection.is_on)
 
 
 if __name__ == "__main__":
     unittest.main()
-
