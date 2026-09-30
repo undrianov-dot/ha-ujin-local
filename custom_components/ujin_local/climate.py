@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature, HVACAction, HVACMode
@@ -26,7 +25,7 @@ from .const import (
 )
 from .entity import UjinEntity
 from .hub import UjinHub
-from .protocol import value_is_on
+from .protocol import finite_number, value_is_on, whole_degree
 
 
 def _is_thermostat(model: str) -> bool:
@@ -86,21 +85,26 @@ class UjinThermostat(UjinEntity, ClimateEntity):
     @property
     def current_temperature(self) -> float | None:
         _, value = self.device.first_signal(CURRENT_TEMPERATURE_KEYS)
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+        return finite_number(value)
+
+    @property
+    def current_humidity(self) -> float | None:
+        return finite_number(self.device.signals.get("hum"))
 
     @property
     def target_temperature(self) -> float | None:
         _, value = self.device.first_signal(TARGET_TEMPERATURE_KEYS)
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            # Current Potato thermostat firmware does not advertise its
-            # setpoint. Use the room temperature as the initial UI value so
-            # Home Assistant can still render a usable thermostat control.
-            return self.current_temperature
+        # A measured temperature is not a setpoint. Wait for real telemetry.
+        return finite_number(value)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            **super().extra_state_attributes,
+            "floor_temperature": finite_number(self.device.signals.get("term-sex")),
+            "regulation_type_code": self.device.signals.get("treg-type"),
+            "regulation_status_code": self.device.signals.get("treg-err"),
+        }
 
     @property
     def supported_features(self) -> ClimateEntityFeature:
@@ -119,18 +123,15 @@ class UjinThermostat(UjinEntity, ClimateEntity):
             return
         signal_name, _ = self.device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
         if signal_name is None:
-            signal_name = DEFAULT_TARGET_TEMPERATURE_KEY
-        try:
-            target = float(temperature)
-        except (TypeError, ValueError) as err:
-            raise HomeAssistantError("Thermostat temperature must be numeric") from err
-        if not math.isfinite(target):
-            raise HomeAssistantError("Thermostat temperature must be finite")
-        if not self._attr_min_temp <= target <= self._attr_max_temp:
-            raise HomeAssistantError(
-                f"Thermostat temperature must be between "
-                f"{self._attr_min_temp} and {self._attr_max_temp} °C"
+            signal_name = (
+                "treg" if "potato-trm" in self.device.model.lower()
+                else DEFAULT_TARGET_TEMPERATURE_KEY
             )
+        try:
+            target = whole_degree(temperature, self.min_temp, self.max_temp)
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
         await self.hub.async_send_changes(self.serial, {signal_name: target})
         self.device.signals[signal_name] = target
         self.async_write_ha_state()
+

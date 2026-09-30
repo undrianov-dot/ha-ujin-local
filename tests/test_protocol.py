@@ -16,6 +16,39 @@ SPEC.loader.exec_module(protocol)
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_unsigned_serial_and_envelope_ack_id(self):
+        packet = protocol.parse_packet(json.dumps({
+            "header": {"id": 4187268204, "uniq_id": 123,
+                       "body": {"data": {"treg": 12}}}
+        }))
+        self.assertEqual(packet.serial, 4187268204)
+        self.assertEqual(packet.unique_id, 123)
+        self.assertEqual(packet.signals["treg"], 12)
+
+    def test_top_level_ack_id_with_body(self):
+        packet = protocol.parse_packet(json.dumps({
+            "uniq_id": "456", "header": {"body": {"id": 17, "data": {"term": 25}}}
+        }))
+        self.assertEqual(packet.unique_id, "456")
+
+    def test_whole_degree_rounding_and_validation(self):
+        for value, expected in [(21, 21), (21.2, 21), (21.5, 22), (22.5, 23), ("24", 24)]:
+            self.assertEqual(protocol.whole_degree(value), expected)
+        for value in (None, True, "bad", "nan", float("inf"), 4.9, 40.1):
+            with self.assertRaises(ValueError):
+                protocol.whole_degree(value)
+
+    def test_mesh_uses_advertised_private_address_and_device_port(self):
+        self.assertEqual(protocol.command_endpoint({"ip": "192.168.1.27", "udpp": 30300}, "192.168.1.23", 9999), ("192.168.1.27", 30300))
+        for address in ("bad", "0.0.0.0", "127.0.0.1", "8.8.8.8", "224.0.0.1", "255.255.255.255"):
+            self.assertEqual(protocol.command_endpoint({"ip": address, "udpp": -1}, "192.168.1.27", 30300), ("192.168.1.27", 30300))
+        self.assertEqual(protocol.command_endpoint({"udpp": 30300.5}, "192.168.1.27", 30300)[1], 30300)
+
+    def test_finite_measurements(self):
+        for value in (None, True, float("nan"), float("inf")):
+            self.assertIsNone(protocol.finite_number(value))
+        self.assertEqual(protocol.finite_number("27.9"), 27.9)
+
     def test_parses_potato_packet(self):
         packet = protocol.parse_packet(
             '{"id":114358760,"devName":"ujin-potato-trm-m1",'
@@ -102,3 +135,4 @@ class ProtocolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

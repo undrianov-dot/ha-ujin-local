@@ -9,7 +9,7 @@ AVAILABILITY_REFRESH_INTERVAL = timedelta(seconds=30)
 COMMAND_ACK_TIMEOUT = timedelta(seconds=5)
 PERSISTENCE_INTERVAL = timedelta(seconds=30)
 PERSISTED_DEVICES_KEY = "devices"
-PLATFORMS = ["binary_sensor", "climate", "sensor", "switch"]
+PLATFORMS = ["binary_sensor", "climate", "number", "sensor", "switch"]
 
 SIGNAL_DEVICE_ADDED = f"{DOMAIN}_device_added"
 SIGNAL_DEVICE_UPDATED = f"{DOMAIN}_device_updated"
@@ -19,9 +19,9 @@ LEAK_MODEL_MARKERS = ("-ld-", "waterleak", "aqua")
 RELAY_MODEL_MARKERS = ("dinrelay", "din-relay")
 
 TARGET_TEMPERATURE_KEYS = (
+    "treg",
     "reg-term",
     "reg_term",
-    "treg",
     "t-reg",
     "target-temp",
     "target_temperature",
@@ -57,7 +57,11 @@ VALVE_KEYS = ("rele-w", "water-valve", "water_valve", "valve", "rele1")
 RELAY_KEYS = ("rele1", "rele2")
 RELAY_INPUT_KEYS = ("in1", "in2")
 
-THERMOSTAT_SENSOR_KEYS = ("co2", "air-iaq", "lux", "rssi")
+THERMOSTAT_SENSOR_KEYS = (
+    "term", "term-sex", "hum", "co2", "air-iaq", "tvoc", "lux",
+    "air-pressure", "noise-db", "brd-term", "rssi", "treg-type", "treg-err",
+    "hyst", "pi-t", "scr_time", "tmn2", "tmxs2",
+)
 RELAY_SENSOR_KEYS = ("rssi",)
 CURATED_SENSOR_KEYS = frozenset((*THERMOSTAT_SENSOR_KEYS, *RELAY_SENSOR_KEYS))
 
@@ -78,3 +82,4 @@ METADATA_KEYS = {
     "sn",
     *SECRET_KEYS,
 }
+

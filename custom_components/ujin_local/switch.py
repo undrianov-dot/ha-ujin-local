@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity import EntityCategory
 
 from .const import (
     DOMAIN,
@@ -20,6 +21,7 @@ from .const import (
 from .entity import UjinEntity
 from .hub import UjinHub
 from .protocol import value_is_on
+from .climate import _is_thermostat
 
 
 async def async_setup_entry(
@@ -38,6 +40,8 @@ async def async_setup_entry(
         )
         is_relay = any(marker in device.model.lower() for marker in RELAY_MODEL_MARKERS)
         requested: list[tuple[str, str, bool]] = []
+        if _is_thermostat(device.model) and "kid-bl" in device.signals:
+            requested.append(("kid-bl", "Child lock", False))
         if is_relay:
             requested.extend(
                 (key, f"Relay {index}", False)
@@ -75,6 +79,9 @@ class UjinSignalSwitch(UjinEntity, SwitchEntity):
         self.is_valve = is_valve
         self._attr_unique_id = f"{serial}_{signal_name}_switch"
         self._attr_name = name
+        if signal_name == "kid-bl":
+            self._attr_entity_category = EntityCategory.CONFIG
+            self._attr_icon = "mdi:lock"
         self._attr_device_class = (
             SwitchDeviceClass.SWITCH
         )
@@ -83,8 +90,13 @@ class UjinSignalSwitch(UjinEntity, SwitchEntity):
     def is_on(self) -> bool:
         return value_is_on(self.device.signals.get(self.signal_name))
 
+    @property
+    def available(self) -> bool:
+        return super().available and self.signal_name in self.device.signals
+
     async def async_turn_on(self, **kwargs) -> None:
         await self.hub.async_send_changes(self.serial, {self.signal_name: 1})
 
     async def async_turn_off(self, **kwargs) -> None:
         await self.hub.async_send_changes(self.serial, {self.signal_name: 0})
+
