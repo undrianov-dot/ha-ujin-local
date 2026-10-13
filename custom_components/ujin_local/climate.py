@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature, HVACAction, HVACMode
@@ -10,11 +9,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     CURRENT_TEMPERATURE_KEYS,
+    DEFAULT_TARGET_TEMPERATURE_KEY,
     DOMAIN,
     HEAT_RELAY_KEYS,
     SIGNAL_DEVICE_ADDED,
@@ -25,7 +25,7 @@ from .const import (
 )
 from .entity import UjinEntity
 from .hub import UjinHub
-from .protocol import value_is_on
+from .protocol import finite_number, value_is_on, whole_degree
 
 
 def _is_thermostat(model: str) -> bool:
@@ -36,6 +36,25 @@ def _is_thermostat(model: str) -> bool:
 def _has_thermostat_signals(signals: dict[str, Any]) -> bool:
     keys = {key.lower() for key in signals}
     return bool(keys & set(CURRENT_TEMPERATURE_KEYS + TARGET_TEMPERATURE_KEYS))
+
+
+async def async_set_setpoint(hub: UjinHub, serial: int, temperature: Any) -> None:
+    """Shared, acknowledged whole-degree command for climate and number controls."""
+    device = hub.devices[serial]
+    signal_name, _ = device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
+    if signal_name is None:
+        signal_name = (
+            "treg" if "potato-trm" in device.model.lower()
+            else DEFAULT_TARGET_TEMPERATURE_KEY
+        )
+    try:
+        target = whole_degree(temperature, 5, 40)
+    except ValueError as err:
+        raise HomeAssistantError(str(err)) from err
+    await hub.async_send_changes(serial, {signal_name: target})
+    device.signals[signal_name] = target
+    hub._persist_device(device)
+    async_dispatcher_send(hub.hass, SIGNAL_DEVICE_UPDATED, serial)
 
 
 async def async_setup_entry(
@@ -74,7 +93,7 @@ class UjinThermostat(UjinEntity, ClimateEntity):
     _attr_hvac_mode = HVACMode.HEAT
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _attr_target_temperature_step = 0.5
+    _attr_target_temperature_step = 1
     _attr_min_temp = 5
     _attr_max_temp = 40
 
@@ -85,24 +104,29 @@ class UjinThermostat(UjinEntity, ClimateEntity):
     @property
     def current_temperature(self) -> float | None:
         _, value = self.device.first_signal(CURRENT_TEMPERATURE_KEYS)
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+        return finite_number(value)
+
+    @property
+    def current_humidity(self) -> float | None:
+        return finite_number(self.device.signals.get("hum"))
 
     @property
     def target_temperature(self) -> float | None:
         _, value = self.device.first_signal(TARGET_TEMPERATURE_KEYS)
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+        # A measured temperature is not a setpoint. Wait for real telemetry.
+        return finite_number(value)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            **super().extra_state_attributes,
+            "floor_temperature": finite_number(self.device.signals.get("term-sex")),
+            "regulation_type_code": self.device.signals.get("treg-type"),
+            "regulation_status_code": self.device.signals.get("treg-err"),
+        }
 
     @property
     def supported_features(self) -> ClimateEntityFeature:
-        signal_name, _ = self.device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
-        if signal_name is None:
-            return ClimateEntityFeature(0)
         return ClimateEntityFeature.TARGET_TEMPERATURE
 
     @property
@@ -116,21 +140,5 @@ class UjinThermostat(UjinEntity, ClimateEntity):
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
-        try:
-            temperature = float(temperature)
-        except (TypeError, ValueError) as err:
-            raise HomeAssistantError("Thermostat temperature must be numeric") from err
-        if not math.isfinite(temperature):
-            raise HomeAssistantError("Thermostat temperature must be finite")
-        if not self._attr_min_temp <= temperature <= self._attr_max_temp:
-            raise HomeAssistantError(
-                f"Thermostat temperature must be between "
-                f"{self._attr_min_temp} and {self._attr_max_temp} °C"
-            )
-        signal_name, _ = self.device.first_signal(WRITABLE_TARGET_TEMPERATURE_KEYS)
-        if signal_name is None:
-            raise HomeAssistantError(
-                "The thermostat has not advertised a target-temperature signal"
-            )
-        self.device.signals[signal_name] = temperature
-        await self.hub.async_send_changes(self.serial, {signal_name: temperature})
+        await async_set_setpoint(self.hub, self.serial, temperature)
+        self.async_write_ha_state()

@@ -6,6 +6,7 @@ from homeassistant.components.binary_sensor import BinarySensorDeviceClass, Bina
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
@@ -36,6 +37,7 @@ async def async_setup_entry(
         lower_model = device.model.lower()
         requested: list[tuple[str, str, BinarySensorDeviceClass | None]] = []
         if any(marker in lower_model for marker in LEAK_MODEL_MARKERS):
+            requested.append(("connectivity", "Connection", BinarySensorDeviceClass.CONNECTIVITY))
             requested.append(("leak", "Leak", BinarySensorDeviceClass.MOISTURE))
         if any(marker in lower_model for marker in RELAY_MODEL_MARKERS):
             requested.extend(
@@ -75,9 +77,13 @@ class UjinBinarySensor(UjinEntity, BinarySensorEntity):
         self._attr_name = name
         self._attr_device_class = device_class
         self._attr_unique_id = f"{serial}_{signal_name}_binary"
+        if signal_name == "connectivity":
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
 
     @property
     def is_on(self) -> bool | None:
+        if self.signal_name == "connectivity":
+            return super().available
         if self.signal_name == "leak":
             _, value = self.device.first_signal(LEAK_KEYS)
         else:
@@ -88,6 +94,11 @@ class UjinBinarySensor(UjinEntity, BinarySensorEntity):
 
     @property
     def available(self) -> bool:
+        if self.signal_name == "connectivity":
+            # The connection indicator must remain readable when the device is offline.
+            return True
+        if not super().available:
+            return False
         if self.signal_name == "leak":
             signal_name, _ = self.device.first_signal(LEAK_KEYS)
             return signal_name is not None

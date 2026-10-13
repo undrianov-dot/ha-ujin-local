@@ -5,12 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     LIGHT_LUX,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
     UnitOfRatio,
+    UnitOfTemperature,
+    UnitOfPressure,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -28,6 +30,7 @@ from .const import (
 )
 from .entity import UjinEntity
 from .hub import UjinHub
+from .protocol import finite_number
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +42,21 @@ class UjinSensorDescription:
 
 
 SENSOR_DESCRIPTIONS = {
+    "term": UjinSensorDescription("Air temperature", SensorDeviceClass.TEMPERATURE, UnitOfTemperature.CELSIUS),
+    "term-sex": UjinSensorDescription("Floor temperature", SensorDeviceClass.TEMPERATURE, UnitOfTemperature.CELSIUS),
+    "hum": UjinSensorDescription("Humidity", SensorDeviceClass.HUMIDITY, "%"),
+    "air-pressure": UjinSensorDescription("Air pressure", SensorDeviceClass.ATMOSPHERIC_PRESSURE, UnitOfPressure.PA),
+    "noise-db": UjinSensorDescription("Noise level", SensorDeviceClass.SOUND_PRESSURE, "dB"),
+    "brd-term": UjinSensorDescription("Board temperature", SensorDeviceClass.TEMPERATURE, UnitOfTemperature.CELSIUS, True),
+    # TVOC scale and regulator enums are undocumented; do not guess units/labels.
+    "tvoc": UjinSensorDescription("TVOC raw value", diagnostic=True),
+    "treg-type": UjinSensorDescription("Regulation type code", diagnostic=True),
+    "treg-err": UjinSensorDescription("Regulation status code", diagnostic=True),
+    "hyst": UjinSensorDescription("Hysteresis raw value", diagnostic=True),
+    "pi-t": UjinSensorDescription("PI interval raw value", diagnostic=True),
+    "scr_time": UjinSensorDescription("Screen timeout raw value", diagnostic=True),
+    "tmn2": UjinSensorDescription("Minimum setting raw value", diagnostic=True),
+    "tmxs2": UjinSensorDescription("Maximum setting raw value", diagnostic=True),
     "co2": UjinSensorDescription(
         "Carbon dioxide", SensorDeviceClass.CO2, UnitOfRatio.PARTS_PER_MILLION
     ),
@@ -76,7 +94,7 @@ async def async_setup_entry(
         new_entities: list[UjinSignalSensor] = []
         for key in keys:
             identity = (serial, key)
-            if identity in entities:
+            if identity in entities or key not in device.signals:
                 continue
             entity = UjinSignalSensor(hub, serial, key)
             entities[identity] = entity
@@ -106,14 +124,17 @@ class UjinSignalSensor(UjinEntity, SensorEntity):
         self._attr_name = description.name
         self._attr_device_class = description.device_class
         self._attr_native_unit_of_measurement = description.unit
+        if description.device_class is not None:
+            self._attr_state_class = SensorStateClass.MEASUREMENT
         if description.diagnostic:
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
-            self._attr_entity_registry_enabled_default = False
+            self._attr_entity_registry_enabled_default = signal_name in {"rssi", "treg-type", "treg-err"}
 
     @property
     def native_value(self) -> Any:
-        return self.device.signals.get(self.signal_name)
+        return finite_number(self.device.signals.get(self.signal_name))
 
     @property
     def available(self) -> bool:
-        return self.signal_name in self.device.signals
+        return super().available and self.native_value is not None
+

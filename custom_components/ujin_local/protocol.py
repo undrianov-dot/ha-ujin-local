@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
+import math
+from ipaddress import IPv4Address
 from typing import Any
 
 
@@ -126,14 +128,17 @@ def parse_packet(payload: bytes | str) -> ParsedPacket | None:
         token_raw = signals.get("token")
     token = str(token_raw) if token_raw not in (None, "") else None
 
-    unique_id = source.get("uniq_id", source.get("unique_id"))
-    if unique_id is None:
-        unique_id = signals.get("uniq_id", signals.get("unique_id"))
+    unique_id = None
+    for mapping in (source, envelope, decoded, signals):
+        unique_id = mapping.get("uniq_id", mapping.get("unique_id"))
+        if unique_id is not None:
+            break
 
     # Some current firmware keeps protocol metadata at the envelope level.
     for key in ("uniq_id", "ver", "rssi", "time"):
-        if key in source and key not in signals:
-            signals[key] = source[key]
+        for mapping in (source, envelope, decoded):
+            if key in mapping and key not in signals:
+                signals[key] = mapping[key]
 
     return ParsedPacket(
         serial=serial,
@@ -170,3 +175,46 @@ def value_is_on(value: Any) -> bool:
         if normalized in {"1", "true", "on", "open", "yes"}:
             return True
     return bool(value)
+
+
+def finite_number(value: Any) -> float | None:
+    """Reject missing, boolean and non-finite sensor values."""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def whole_degree(value: Any, minimum: float = 5, maximum: float = 40) -> int:
+    """Validate before rounding; half degrees round up, not to even."""
+    number = finite_number(value)
+    if number is None or not minimum <= number <= maximum:
+        raise ValueError(f"Temperature must be between {minimum} and {maximum} �C")
+    target = math.floor(number + 0.5)
+    if not minimum <= target <= maximum:
+        raise ValueError("Rounded temperature is outside the device limits")
+    return target
+
+
+def command_endpoint(signals: dict[str, Any], source_ip: str, default_port: int) -> tuple[str, int]:
+    """Use the device's LAN address when telemetry is forwarded by UJIN mesh.
+
+    Never redirect commands to a public, multicast or unspecified address.
+    The HA listening port is not necessarily the device management port.
+    """
+    address = source_ip
+    try:
+        candidate = IPv4Address(str(signals.get("ip", "")))
+        if candidate.is_private and not (
+            candidate.is_loopback or candidate.is_multicast or candidate.is_unspecified
+            or str(candidate) == "255.255.255.255"
+        ):
+            address = str(candidate)
+    except ValueError:
+        pass
+    port = finite_number(signals.get("udpp"))
+    return address, int(port) if port is not None and port.is_integer() and 1 <= port <= 65535 else default_port
+

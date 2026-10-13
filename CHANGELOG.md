@@ -1,19 +1,23 @@
 # Changelog
 
-## 0.2.0
+## 0.4.1
 
-- Stable entity set for thermostats, the DIN relay, and the leak controller.
-- Automatically disable noisy raw sensors created by version 0.1.
-- Add two switches and two binary inputs for `dinrelay_m4`.
-- Require devices to advertise a setpoint field before enabling temperature control.
-- Require a matching `uniq_id` acknowledgement for control commands.
-- Validate thermostat setpoints before sending UDP management commands.
-- Persist device connection details and refresh availability every 30 seconds.
-- Improve parsing of nested and incomplete UDP envelopes.
-- Fix the Russian README encoding.
+- Persist leak, water-valve, relay and input states across restarts. Critical
+  state changes bypass the normal 30-second measurement persistence throttle.
+- Add a separate controller connection indicator. Receiving a heartbeat no
+  longer has to be confused with receiving the valve/leak state.
+- Add an absolute temperature-setpoint number control to every thermostat,
+  with a 1 degree Celsius step and the existing 5-40 degree safety range.
+- Share the acknowledged setpoint command between climate and number controls;
+  failed commands do not change the displayed or persisted target.
+- Mark cached leak readings unavailable when the device heartbeat expires.
 
-## 0.1.0
+## 0.3.1
 
-- First experimental release.
-- Local UDP discovery on port `30300`.
-- Climate entities, leak sensors, generic signal sensors, and diagnostics.
+- Restore the complete constants module after the 0.3.0 packaging error.
+
+## 0.3.0
+
+- Enable target-temperature controls for Potato thermostats that only publish the current `term` value.
+- Send the local `reg-term` management command when firmware does not advertise a writable setpoint signal.
+- Keep the last acknowledged setpoint visible in Home Assistant.

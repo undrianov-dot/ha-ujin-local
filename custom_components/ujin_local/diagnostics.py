@@ -19,6 +19,7 @@ async def async_get_config_entry_diagnostics(
             str(serial): {
                 "model": device.model,
                 "ip_address": device.ip_address,
+                "management_port": device.management_port,
                 "token_received": bool(device.token),
                 "last_seen": device.last_seen.isoformat(),
                 "signals": {
@@ -30,3 +31,4 @@ async def async_get_config_entry_diagnostics(
             for serial, device in hub.devices.items()
         },
     }
+
