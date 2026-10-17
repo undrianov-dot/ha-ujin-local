@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Keep known entity values available during UDP outages; the leak controller's
+  separate connection entity still reports whether its heartbeat is recent.
+- Throttle persistence of `last_seen` updates to five minutes while saving
+  device metadata and critical signal changes immediately.
+- Recursively redact nested secret fields in diagnostics.
+- Always clear and cancel pending command futures after send errors or cancellation.
+
 ## 0.4.1
 
 - Persist leak, water-valve, relay and input states across restarts. Critical
