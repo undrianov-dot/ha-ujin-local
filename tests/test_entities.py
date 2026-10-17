@@ -68,7 +68,7 @@ def load_modules():
     sys.modules[package.__name__] = package
     loaded = {}
     try:
-        for name in ("const", "protocol", "hub", "entity", "climate", "number", "switch", "sensor", "binary_sensor"):
+        for name in ("const", "protocol", "hub", "entity", "climate", "number", "switch", "sensor", "binary_sensor", "diagnostics"):
             spec = importlib.util.spec_from_file_location(f"{package.__name__}.{name}", ROOT / f"{name}.py")
             item = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = item
@@ -122,12 +122,15 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_send_error_does_not_block_device(self):
         hub, _ = self.make_hub()
+        pending_futures = []
         def send(*a):
+            pending_futures.append(hub._pending_commands[4187268204][1])
             raise OSError("test error")
         hub.transport = SimpleNamespace(sendto=send)
         with self.assertRaises(RuntimeError):
             await hub.async_send_changes(4187268204, {"treg": 13})
         self.assertEqual(hub._pending_commands, {})
+        self.assertTrue(pending_futures[0].cancelled())
 
     async def test_step_and_real_setpoint_priority(self):
         hub, _ = self.make_hub()
@@ -147,7 +150,34 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await climate.async_set_temperature(temperature=14)
         self.assertEqual(sent[-1], {"treg": 14})
         device.last_seen = datetime.now(timezone.utc) - timedelta(minutes=6)
-        self.assertFalse(climate.available)
+        self.assertTrue(climate.available)
+        self.assertEqual(climate.current_temperature, 27.9)
+        self.assertEqual(climate.target_temperature, 14)
+
+    async def test_last_seen_persistence_is_throttled_but_critical_changes_are_immediate(self):
+        hub, updates = self.make_hub()
+        device = hub.devices[4187268204]
+        device.signals = {"term": 27.9}
+        hub._persist_device(device)
+        self.assertEqual(len(updates), 1)
+
+        saved_seen = device.last_seen
+        device.last_seen = saved_seen + timedelta(minutes=4)
+        hub._persist_device(device)
+        self.assertEqual(len(updates), 1)
+
+        device.last_seen = saved_seen + timedelta(minutes=5, seconds=1)
+        hub._persist_device(device)
+        self.assertEqual(len(updates), 2)
+
+        device.signals["term"] = 28.1
+        device.last_seen += timedelta(seconds=1)
+        hub._persist_device(device)
+        self.assertEqual(len(updates), 2)
+
+        device.signals["leak"] = 1
+        hub._persist_device(device)
+        self.assertEqual(len(updates), 3)
 
     async def test_persistence_keeps_measurements_not_secret_signals(self):
         hub, updates = self.make_hub()
@@ -246,10 +276,15 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(restored.devices[serial].signals["rele-w"], 1)
         self.assertEqual(restored.devices[serial].signals["leak"], 1)
         leak = MODULES["binary_sensor"].UjinBinarySensor(restored, serial, "leak", "Leak", "moisture")
+        connection = MODULES["binary_sensor"].UjinBinarySensor(
+            restored, serial, "connectivity", "Connection", "connectivity"
+        )
         self.assertTrue(leak.available)
         self.assertTrue(leak.is_on)
         restored.devices[serial].last_seen -= timedelta(minutes=6)
-        self.assertFalse(leak.available)
+        self.assertTrue(leak.available)
+        self.assertTrue(leak.is_on)
+        self.assertFalse(connection.is_on)
 
     async def test_connection_is_separate_from_unknown_controller_state(self):
         hub, _ = self.make_hub()
@@ -264,6 +299,43 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         hub.devices[serial].last_seen -= timedelta(minutes=6)
         self.assertTrue(connection.available)
         self.assertFalse(connection.is_on)
+
+    async def test_sensor_and_switch_keep_last_known_values_when_stale(self):
+        hub, _ = self.make_hub()
+        device = hub.devices[4187268204]
+        device.signals = {"term": 27.9, "kid-bl": 1}
+        device.last_seen -= timedelta(minutes=6)
+
+        sensor = MODULES["sensor"].UjinSignalSensor(hub, device.serial, "term")
+        switch = MODULES["switch"].UjinSignalSwitch(
+            hub, device.serial, "kid-bl", "Child lock", False
+        )
+
+        self.assertTrue(sensor.available)
+        self.assertEqual(sensor.native_value, 27.9)
+        self.assertTrue(switch.available)
+        self.assertTrue(switch.is_on)
+
+    async def test_diagnostics_redacts_nested_secrets(self):
+        hub, _ = self.make_hub()
+        device = hub.devices[4187268204]
+        device.signals = {
+            "term": 21.5,
+            "metadata": {"TOKEN": "secret", "nested": [{"password": "secret"}]},
+        }
+        hass = SimpleNamespace(data={"ujin_local": {"entry": hub}})
+        entry = SimpleNamespace(entry_id="entry")
+
+        diagnostics = await MODULES["diagnostics"].async_get_config_entry_diagnostics(
+            hass, entry
+        )
+
+        signals = diagnostics["devices"][str(device.serial)]["signals"]
+        self.assertEqual(signals["term"], 21.5)
+        self.assertEqual(signals["metadata"]["TOKEN"], "**REDACTED**")
+        self.assertEqual(
+            signals["metadata"]["nested"][0]["password"], "**REDACTED**"
+        )
 
 
 if __name__ == "__main__":

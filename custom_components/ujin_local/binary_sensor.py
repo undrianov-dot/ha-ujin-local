@@ -20,7 +20,7 @@ from .const import (
 )
 from .entity import UjinEntity
 from .hub import UjinHub
-from .protocol import value_is_on
+from .protocol import is_recent, value_is_on
 
 
 async def async_setup_entry(
@@ -83,7 +83,7 @@ class UjinBinarySensor(UjinEntity, BinarySensorEntity):
     @property
     def is_on(self) -> bool | None:
         if self.signal_name == "connectivity":
-            return super().available
+            return is_recent(self.device.last_seen)
         if self.signal_name == "leak":
             _, value = self.device.first_signal(LEAK_KEYS)
         else:
@@ -97,8 +97,6 @@ class UjinBinarySensor(UjinEntity, BinarySensorEntity):
         if self.signal_name == "connectivity":
             # The connection indicator must remain readable when the device is offline.
             return True
-        if not super().available:
-            return False
         if self.signal_name == "leak":
             signal_name, _ = self.device.first_signal(LEAK_KEYS)
             return signal_name is not None
