@@ -8,6 +8,8 @@
   device metadata and critical signal changes immediately.
 - Recursively redact nested secret fields in diagnostics.
 - Always clear and cancel pending command futures after send errors or cancellation.
+- Accept a command response that reports the requested signal value even when
+  firmware omits `uniq_id`; unrelated or stale values still time out.
 
 ## 0.4.1
 

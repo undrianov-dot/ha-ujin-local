@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).parents[1] / "custom_components" / "ujin_local"
 
@@ -108,6 +109,55 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         await hub.async_send_changes(4187268204, {"treg": 13})
         self.assertEqual(sent[0][1], ("192.168.1.27", 30300))
         self.assertEqual(hub.devices[4187268204].ip_address, "192.168.1.27")
+        self.assertEqual(hub._pending_commands, {})
+
+    async def test_command_accepts_state_confirmation_without_uniq_id(self):
+        hub, _ = self.make_hub()
+
+        def send(payload, address):
+            response = {
+                "header": {
+                    "id": 4187268204,
+                    "data": {"treg": "13"},
+                }
+            }
+            asyncio.get_running_loop().call_soon(
+                hub.handle_datagram,
+                json.dumps(response).encode(),
+                ("192.168.1.27", 30300),
+            )
+
+        hub.transport = SimpleNamespace(sendto=send)
+        await hub.async_send_changes(4187268204, {"treg": 13})
+
+        self.assertEqual(hub._pending_commands, {})
+        self.assertEqual(hub.devices[4187268204].signals["treg"], "13")
+
+    async def test_old_state_does_not_confirm_requested_temperature(self):
+        hub, _ = self.make_hub()
+
+        def send(payload, address):
+            response = {
+                "header": {
+                    "id": 4187268204,
+                    "data": {"treg": 12},
+                }
+            }
+            asyncio.get_running_loop().call_soon(
+                hub.handle_datagram,
+                json.dumps(response).encode(),
+                ("192.168.1.27", 30300),
+            )
+
+        hub.transport = SimpleNamespace(sendto=send)
+        with patch.object(
+            hub_module, "COMMAND_ACK_TIMEOUT", timedelta(milliseconds=1)
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "did not confirm the requested value"
+            ):
+                await hub.async_send_changes(4187268204, {"treg": 13})
+
         self.assertEqual(hub._pending_commands, {})
 
     async def test_cancelled_command_does_not_block_device(self):

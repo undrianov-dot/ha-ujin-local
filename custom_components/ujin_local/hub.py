@@ -45,6 +45,16 @@ _PERSISTED_SIGNALS = CURATED_SENSOR_KEYS | _CRITICAL_SIGNALS | frozenset(
 )
 
 
+def _values_match(expected: Any, actual: Any) -> bool:
+    """Compare protocol values without treating booleans as numeric values."""
+    if isinstance(expected, bool) or isinstance(actual, bool):
+        return expected is actual
+    try:
+        return float(expected) == float(actual)
+    except (TypeError, ValueError, OverflowError):
+        return expected == actual
+
+
 @dataclass(slots=True)
 class UjinDevice:
     """Runtime state of one local UJIN device."""
@@ -74,6 +84,28 @@ class UjinDevice:
         return None, None
 
 
+_MISSING = object()
+
+
+def _command_state_confirmed(
+    signals: dict[str, Any], changes: dict[str, Any]
+) -> bool:
+    """Return whether one received packet reports every requested value."""
+    if not changes:
+        return False
+    normalized = {
+        UjinDevice._normalize_signal_name(key): value
+        for key, value in signals.items()
+        if isinstance(key, str)
+    }
+    return all(
+        (value := normalized.get(UjinDevice._normalize_signal_name(key), _MISSING))
+        is not _MISSING
+        and _values_match(expected, value)
+        for key, expected in changes.items()
+    )
+
+
 class _UjinDatagramProtocol(asyncio.DatagramProtocol):
     def __init__(self, hub: "UjinHub") -> None:
         self.hub = hub
@@ -98,7 +130,9 @@ class UjinHub:
         self.transport: asyncio.DatagramTransport | None = None
         self.devices: dict[int, UjinDevice] = {}
         self._availability_unsub: Any = None
-        self._pending_commands: dict[int, tuple[int, asyncio.Future[bool]]] = {}
+        self._pending_commands: dict[
+            int, tuple[int, asyncio.Future[bool], dict[str, Any]]
+        ] = {}
         self._persisted_devices: dict[int, tuple[str, str, str, datetime]] = {}
         self._persisted_critical_signals: dict[int, dict[str, Any]] = {}
         self._restore_devices()
@@ -211,7 +245,7 @@ class UjinHub:
         if self.transport is not None:
             self.transport.close()
             self.transport = None
-        for _, future in self._pending_commands.values():
+        for _, future, _ in self._pending_commands.values():
             if not future.done():
                 future.cancel()
         self._pending_commands.clear()
@@ -246,10 +280,23 @@ class UjinHub:
         self._persist_device(device)
 
         pending = self._pending_commands.get(packet.serial)
-        if pending is not None and str(packet.unique_id) == str(pending[0]):
-            if not pending[1].done():
-                pending[1].set_result(True)
-            self._pending_commands.pop(packet.serial, None)
+        if pending is not None:
+            acknowledged = str(packet.unique_id) == str(pending[0])
+            state_confirmed = _command_state_confirmed(
+                packet.signals, pending[2]
+            )
+            if acknowledged or state_confirmed:
+                if not pending[1].done():
+                    pending[1].set_result(True)
+                self._pending_commands.pop(packet.serial, None)
+            else:
+                _LOGGER.debug(
+                    "UJIN response for %s did not confirm pending command "
+                    "(uniq_id=%s, signal_keys=%s)",
+                    packet.serial,
+                    packet.unique_id,
+                    sorted(packet.signals),
+                )
 
         signal = SIGNAL_DEVICE_ADDED if is_new else SIGNAL_DEVICE_UPDATED
         async_dispatcher_send(self.hass, signal, packet.serial)
@@ -289,7 +336,7 @@ class UjinHub:
         unique_id = int(time.time_ns() // 1_000_000 % 100_000_000)
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
-        self._pending_commands[serial] = (unique_id, future)
+        self._pending_commands[serial] = (unique_id, future, changes.copy())
         payload = build_management_command(serial, device.token, unique_id, changes)
         try:
             self.transport.sendto(payload, (device.ip_address, device.management_port))
@@ -298,7 +345,9 @@ class UjinHub:
             _LOGGER.warning("No UJIN acknowledgement for %s at %s:%s", serial, device.ip_address, device.management_port)
             raise HomeAssistantError(
                 f"UJIN device {serial} at {device.ip_address}:{device.management_port} "
-                "did not acknowledge the command; check Wi-Fi/mesh connectivity"
+                "did not confirm the requested value within "
+                f"{COMMAND_ACK_TIMEOUT.total_seconds():g} seconds; check the device "
+                "response, supported command fields, and network connectivity"
             ) from err
         except OSError as err:
             raise HomeAssistantError(f"Cannot send command to UJIN device {serial}: {err}") from err
