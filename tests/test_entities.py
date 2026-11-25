@@ -158,6 +158,35 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(hub._pending_commands, {})
 
+    async def test_stale_state_does_not_confirm_changed_temperature(self):
+        hub, _ = self.make_hub()
+        device = hub.devices[4187268204]
+        device.signals["treg"] = 13
+
+        def send(payload, address):
+            response = {
+                "header": {
+                    "id": 4187268204,
+                    "data": {"treg": 13},
+                }
+            }
+            asyncio.get_running_loop().call_soon(
+                hub.handle_datagram,
+                json.dumps(response).encode(),
+                ("192.168.1.27", 30300),
+            )
+
+        hub.transport = SimpleNamespace(sendto=send)
+        with patch.object(
+            hub_module, "COMMAND_ACK_TIMEOUT", timedelta(milliseconds=1)
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "did not confirm the requested value"
+            ):
+                await hub.async_send_changes(4187268204, {"treg": 14})
+
+        self.assertEqual(hub._pending_commands, {})
+
     async def test_cancelled_command_does_not_block_device(self):
         hub, _ = self.make_hub()
         hub.transport = SimpleNamespace(sendto=lambda *a: None)
@@ -226,6 +255,39 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         device.signals["leak"] = 1
         hub._persist_device(device)
         self.assertEqual(len(updates), 3)
+
+    async def test_management_port_change_persists_immediately(self):
+        hub, updates = self.make_hub()
+        device = hub.devices[4187268204]
+        device.management_port = 30301
+
+        hub._persist_device(device)
+
+        self.assertEqual(len(updates), 1)
+        stored = updates[-1]["data"]["devices"][str(device.serial)]
+        self.assertEqual(stored["management_port"], 30301)
+
+        device.last_seen += timedelta(minutes=4)
+        hub._persist_device(device)
+        self.assertEqual(len(updates), 1)
+
+    async def test_connection_entity_is_created_for_every_device(self):
+        hub, _ = self.make_hub()
+        hass = SimpleNamespace(data={"ujin_local": {"entry": hub}})
+        entry = SimpleNamespace(entry_id="entry", async_on_unload=lambda *a: None)
+        entities = []
+
+        await MODULES["binary_sensor"].async_setup_entry(
+            hass, entry, entities.extend
+        )
+
+        connection = next(
+            item
+            for item in entities
+            if item.signal_name == "connectivity"
+        )
+        self.assertTrue(connection.available)
+        self.assertTrue(connection.is_on)
 
     async def test_persistence_keeps_measurements_not_secret_signals(self):
         hub, updates = self.make_hub()

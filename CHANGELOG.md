@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add a separate Home Assistant connection entity for every UJIN device.
+- Save advertised management-port changes immediately instead of waiting for
+  the normal measurement persistence interval.
+- Require a pending setpoint command to show a real state transition (or
+  unchanged target) after it is sent, preventing stale UDP telemetry from
+  falsely confirming firmware that omits `uniq_id`.
 - Keep known entity values available during UDP outages; the leak controller's
   separate connection entity still reports whether its heartbeat is recent.
 - Throttle persistence of `last_seen` updates to five minutes while saving

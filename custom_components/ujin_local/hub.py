@@ -88,9 +88,11 @@ _MISSING = object()
 
 
 def _command_state_confirmed(
-    signals: dict[str, Any], changes: dict[str, Any]
+    signals: dict[str, Any],
+    changes: dict[str, Any],
+    previous_signals: dict[str, Any],
 ) -> bool:
-    """Return whether one received packet reports every requested value."""
+    """Return whether telemetry confirms a real state transition or unchanged target."""
     if not changes:
         return False
     normalized = {
@@ -98,12 +100,23 @@ def _command_state_confirmed(
         for key, value in signals.items()
         if isinstance(key, str)
     }
-    return all(
-        (value := normalized.get(UjinDevice._normalize_signal_name(key), _MISSING))
-        is not _MISSING
-        and _values_match(expected, value)
-        for key, expected in changes.items()
-    )
+    previous = {
+        UjinDevice._normalize_signal_name(key): value
+        for key, value in previous_signals.items()
+        if isinstance(key, str)
+    }
+    for key, expected in changes.items():
+        normalized_key = UjinDevice._normalize_signal_name(key)
+        actual = normalized.get(normalized_key, _MISSING)
+        before = previous.get(normalized_key, _MISSING)
+        if actual is _MISSING or not _values_match(expected, actual):
+            return False
+        if before is not _MISSING:
+            if _values_match(before, expected):
+                continue
+            if _values_match(before, actual):
+                return False
+    return True
 
 
 class _UjinDatagramProtocol(asyncio.DatagramProtocol):
@@ -131,9 +144,16 @@ class UjinHub:
         self.devices: dict[int, UjinDevice] = {}
         self._availability_unsub: Any = None
         self._pending_commands: dict[
-            int, tuple[int, asyncio.Future[bool], dict[str, Any]]
+            int, tuple[
+                int,
+                asyncio.Future[bool],
+                dict[str, Any],
+                dict[str, Any],
+            ]
         ] = {}
-        self._persisted_devices: dict[int, tuple[str, str, str, datetime]] = {}
+        self._persisted_devices: dict[
+            int, tuple[str, str, str, int, datetime]
+        ] = {}
         self._persisted_critical_signals: dict[int, dict[str, Any]] = {}
         self._restore_devices()
 
@@ -173,6 +193,7 @@ class UjinHub:
                 device.model,
                 device.ip_address,
                 device.token or "",
+                device.management_port,
                 device.last_seen,
             )
             self._persisted_critical_signals[serial] = {
@@ -181,7 +202,12 @@ class UjinHub:
             }
 
     def _persist_device(self, device: UjinDevice) -> None:
-        metadata = (device.model, device.ip_address, device.token or "")
+        metadata = (
+            device.model,
+            device.ip_address,
+            device.token or "",
+            device.management_port,
+        )
         previous = self._persisted_devices.get(device.serial)
         critical_signals = {
             key: value for key, value in device.signals.items()
@@ -189,9 +215,9 @@ class UjinHub:
         }
         if (
             previous is not None
-            and previous[:3] == metadata
+            and previous[:4] == metadata
             and self._persisted_critical_signals.get(device.serial) == critical_signals
-            and device.last_seen - previous[3] < PERSISTENCE_INTERVAL
+            and device.last_seen - previous[4] < PERSISTENCE_INTERVAL
         ):
             return
         persisted = {
@@ -245,7 +271,7 @@ class UjinHub:
         if self.transport is not None:
             self.transport.close()
             self.transport = None
-        for _, future, _ in self._pending_commands.values():
+        for _, future, _, _ in self._pending_commands.values():
             if not future.done():
                 future.cancel()
         self._pending_commands.clear()
@@ -283,7 +309,7 @@ class UjinHub:
         if pending is not None:
             acknowledged = str(packet.unique_id) == str(pending[0])
             state_confirmed = _command_state_confirmed(
-                packet.signals, pending[2]
+                packet.signals, pending[2], pending[3]
             )
             if acknowledged or state_confirmed:
                 if not pending[1].done():
@@ -336,7 +362,13 @@ class UjinHub:
         unique_id = int(time.time_ns() // 1_000_000 % 100_000_000)
         loop = asyncio.get_running_loop()
         future: asyncio.Future[bool] = loop.create_future()
-        self._pending_commands[serial] = (unique_id, future, changes.copy())
+        previous_signals = dict(device.signals)
+        self._pending_commands[serial] = (
+            unique_id,
+            future,
+            changes.copy(),
+            previous_signals,
+        )
         payload = build_management_command(serial, device.token, unique_id, changes)
         try:
             self.transport.sendto(payload, (device.ip_address, device.management_port))
