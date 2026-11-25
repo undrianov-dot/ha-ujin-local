@@ -158,6 +158,58 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(hub._pending_commands, {})
 
+    async def test_command_accepts_equivalent_target_temperature_signal(self):
+        hub, _ = self.make_hub()
+        device = hub.devices[4187268204]
+        device.signals["reg-term"] = 12
+
+        def send(payload, address):
+            response = {
+                "header": {
+                    "id": 4187268204,
+                    "data": {"reg-term": 14},
+                }
+            }
+            asyncio.get_running_loop().call_soon(
+                hub.handle_datagram,
+                json.dumps(response).encode(),
+                ("192.168.1.27", 30300),
+            )
+
+        hub.transport = SimpleNamespace(sendto=send)
+        await hub.async_send_changes(4187268204, {"treg": 14})
+
+        self.assertEqual(hub._pending_commands, {})
+
+    async def test_stale_equivalent_target_signal_does_not_confirm_command(self):
+        hub, _ = self.make_hub()
+        device = hub.devices[4187268204]
+        device.signals["reg-term"] = 12
+
+        def send(payload, address):
+            response = {
+                "header": {
+                    "id": 4187268204,
+                    "data": {"reg-term": 12},
+                }
+            }
+            asyncio.get_running_loop().call_soon(
+                hub.handle_datagram,
+                json.dumps(response).encode(),
+                ("192.168.1.27", 30300),
+            )
+
+        hub.transport = SimpleNamespace(sendto=send)
+        with patch.object(
+            hub_module, "COMMAND_ACK_TIMEOUT", timedelta(milliseconds=1)
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "did not confirm the requested value"
+            ):
+                await hub.async_send_changes(4187268204, {"treg": 14})
+
+        self.assertEqual(hub._pending_commands, {})
+
     async def test_stale_state_does_not_confirm_changed_temperature(self):
         hub, _ = self.make_hub()
         device = hub.devices[4187268204]
