@@ -32,13 +32,15 @@ from .const import (
     VALVE_KEYS,
     RELAY_KEYS,
     RELAY_INPUT_KEYS,
+    THERMOSTAT_RELAY_INVERSION_KEY,
 )
 from .protocol import ParsedPacket, build_management_command, command_endpoint, is_recent, parse_packet
 
 _LOGGER = logging.getLogger(__name__)
 _CRITICAL_SIGNALS = frozenset(
     (*TARGET_TEMPERATURE_KEYS, *HEAT_RELAY_KEYS, *LEAK_KEYS, *VALVE_KEYS,
-     *RELAY_KEYS, *RELAY_INPUT_KEYS, "kid-bl", "br-lcd")
+     *RELAY_KEYS, *RELAY_INPUT_KEYS, "kid-bl", "br-lcd",
+     THERMOSTAT_RELAY_INVERSION_KEY)
 )
 _PERSISTED_SIGNALS = CURATED_SENSOR_KEYS | _CRITICAL_SIGNALS | frozenset(
     ("ver", "ip", "udpp")

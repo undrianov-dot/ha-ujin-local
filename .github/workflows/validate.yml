@@ -39,3 +39,27 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Compile Python
         run: python -m compileall -q custom_components tests
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [validate-hacs, validate-hassfest, protocol-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out validated commit
+        uses: actions/checkout@v5
+      - name: Publish manifest version after validation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          VERSION="v$(python -c 'import json; print(json.load(open("custom_components/ujin_local/manifest.json"))["version"])')"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists; leaving it unchanged."
+            exit 0
+          fi
+          cd custom_components
+          zip -r ../ujin_local.zip ujin_local -x '*/__pycache__/*' '*.pyc'
+          cd ..
+          gh release create "$VERSION" ujin_local.zip --target "$GITHUB_SHA" --title "UJIN Local $VERSION" --notes-file "RELEASE_NOTES_${VERSION#v}.md"

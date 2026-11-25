@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.4.2
 
+- Add the native Potato thermostat relay-inversion configuration switch, only
+  when the exact `rele-inv` signal is received. Unknown or stale settings cannot
+  be written; discovery never sends commands. Persist reported inversion values
+  across restarts without optimistically changing state after a command ACK.
 - Add a separate Home Assistant connection entity for every UJIN device.
 - Save advertised management-port changes immediately instead of waiting for
   the normal measurement persistence interval.

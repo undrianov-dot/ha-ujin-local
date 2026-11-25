@@ -1,4 +1,11 @@
 {
+  "entity": {
+    "switch": {
+      "relay_inversion": {
+        "name": "Инверсия реле"
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {

@@ -255,7 +255,6 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         device.signals["leak"] = 1
         hub._persist_device(device)
         self.assertEqual(len(updates), 3)
-
     async def test_management_port_change_persists_immediately(self):
         hub, updates = self.make_hub()
         device = hub.devices[4187268204]
@@ -355,6 +354,98 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(commands), 1)
         device.token = None
         self.assertFalse(number.available)
+
+    async def test_native_relay_inversion_discovery_and_commands(self):
+        hub, _ = self.make_hub()
+        device = hub.devices[4187268204]
+        device.signals = {"term": 25, "rele-inv": 0}
+        hass = SimpleNamespace(data={"ujin_local": {"entry": hub}})
+        entry = SimpleNamespace(entry_id="entry", async_on_unload=lambda *a: None)
+        commands = []
+        async def send(serial, changes):
+            commands.append((serial, changes))
+        hub.async_send_changes = send
+        switches = []
+        await MODULES["switch"].async_setup_entry(hass, entry, switches.extend)
+        self.assertEqual(commands, [])  # Discovery never applies a setting.
+        self.assertEqual(len(switches), 1)
+        inversion = switches[0]
+        self.assertEqual(inversion.signal_name, "rele-inv")
+        self.assertEqual(inversion._attr_entity_category, "config")
+        self.assertEqual(inversion._attr_translation_key, "relay_inversion")
+        self.assertFalse(inversion._attr_entity_registry_enabled_default)
+        self.assertEqual(inversion._attr_unique_id, f"{device.serial}_rele-inv_switch")
+        self.assertTrue(inversion.available)
+        self.assertFalse(inversion.is_on)
+        await inversion.async_turn_on()
+        self.assertFalse(inversion.is_on)  # ACK without telemetry is not state.
+        device.signals["rele-inv"] = "1"
+        self.assertTrue(inversion.is_on)
+        await inversion.async_turn_off()
+        self.assertTrue(inversion.is_on)
+        self.assertEqual(commands, [(device.serial, {"rele-inv": 1}),
+                                    (device.serial, {"rele-inv": 0})])
+
+    async def test_relay_inversion_rejects_unknown_and_stale_state(self):
+        hub, _ = self.make_hub()
+        device = hub.devices[4187268204]
+        inversion = MODULES["switch"].UjinRelayInversionSwitch(hub, device.serial)
+        commands = []
+        async def send(serial, changes):
+            commands.append(changes)
+        hub.async_send_changes = send
+        for value in (None, 2, -1, "unknown", [], {}):
+            device.signals["rele-inv"] = value
+            self.assertIsNone(inversion.is_on)
+            self.assertFalse(inversion.available)
+            with self.assertRaises(RuntimeError):
+                await inversion.async_turn_on()
+        device.signals["rele-inv"] = False
+        device.last_seen -= timedelta(minutes=6)
+        self.assertFalse(inversion.available)
+        with self.assertRaises(RuntimeError):
+            await inversion.async_turn_off()
+        device.last_seen = datetime.now(timezone.utc)
+        device.token = None
+        self.assertFalse(inversion.available)
+        with self.assertRaises(RuntimeError):
+            await inversion.async_turn_on()
+        self.assertEqual(commands, [])
+
+    async def test_relay_inversion_requires_exact_signal_and_thermostat(self):
+        hub, _ = self.make_hub()
+        device = hub.devices[4187268204]
+        hass = SimpleNamespace(data={"ujin_local": {"entry": hub}})
+        entry = SimpleNamespace(entry_id="entry", async_on_unload=lambda *a: None)
+        device.signals = {"term": 25, "rele1-inv": 0, "treg-type": 2}
+        switches = []
+        await MODULES["switch"].async_setup_entry(hass, entry, switches.extend)
+        self.assertEqual(switches, [])
+        device.model = "ujin-potato-ld-m1"
+        device.signals = {"rele-inv": 0}
+        await MODULES["switch"].async_setup_entry(hass, entry, switches.extend)
+        self.assertEqual(switches, [])
+
+    async def test_relay_inversion_persistence_and_failed_command(self):
+        hub, updates = self.make_hub()
+        device = hub.devices[4187268204]
+        device.signals = {"rele-inv": 0}
+        hub._persist_device(device)
+        device.signals["rele-inv"] = 1
+        hub._persist_device(device)  # Critical change bypasses persistence throttle.
+        self.assertEqual(len(updates), 2)
+        restored = hub_module.UjinHub(
+            hub.hass, SimpleNamespace(data=updates[-1]["data"]), 9999
+        )
+        inversion = MODULES["switch"].UjinRelayInversionSwitch(restored, device.serial)
+        self.assertTrue(inversion.is_on)
+        async def fail(serial, changes):
+            raise RuntimeError("no acknowledgement")
+        restored.async_send_changes = fail
+        with self.assertRaises(RuntimeError):
+            await inversion.async_turn_off()
+        self.assertTrue(inversion.is_on)
+        self.assertEqual(len(updates), 2)
 
     async def test_failed_setpoint_is_not_displayed_or_persisted(self):
         hub, updates = self.make_hub()

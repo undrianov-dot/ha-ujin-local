@@ -43,6 +43,7 @@ CURRENT_TEMPERATURE_KEYS = (
 )
 FLOOR_TEMPERATURE_KEYS = ("term-sex", "floor-temp", "floor_temperature")
 HEAT_RELAY_KEYS = ("rele-wt", "rele-t", "heat", "heating")
+THERMOSTAT_RELAY_INVERSION_KEY = "rele-inv"
 
 LEAK_KEYS = (
     "leak",
