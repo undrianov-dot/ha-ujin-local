@@ -35,9 +35,14 @@ async def async_setup_entry(
     def sync_device(serial: int) -> None:
         device = hub.devices[serial]
         lower_model = device.model.lower()
-        requested: list[tuple[str, str, BinarySensorDeviceClass | None]] = []
+        requested: list[tuple[str, str, BinarySensorDeviceClass | None]] = [
+            (
+                "connectivity",
+                "Connection",
+                BinarySensorDeviceClass.CONNECTIVITY,
+            )
+        ]
         if any(marker in lower_model for marker in LEAK_MODEL_MARKERS):
-            requested.append(("connectivity", "Connection", BinarySensorDeviceClass.CONNECTIVITY))
             requested.append(("leak", "Leak", BinarySensorDeviceClass.MOISTURE))
         if any(marker in lower_model for marker in RELAY_MODEL_MARKERS):
             requested.extend(

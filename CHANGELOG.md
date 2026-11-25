@@ -6,12 +6,20 @@
   when the exact `rele-inv` signal is received. Unknown or stale settings cannot
   be written; discovery never sends commands. Persist reported inversion values
   across restarts without optimistically changing state after a command ACK.
+- Add a separate Home Assistant connection entity for every UJIN device.
+- Save advertised management-port changes immediately instead of waiting for
+  the normal measurement persistence interval.
+- Require a pending setpoint command to show a real state transition (or
+  unchanged target) after it is sent, preventing stale UDP telemetry from
+  falsely confirming firmware that omits `uniq_id`.
 - Keep known entity values available during UDP outages; the leak controller's
   separate connection entity still reports whether its heartbeat is recent.
 - Throttle persistence of `last_seen` updates to five minutes while saving
   device metadata and critical signal changes immediately.
 - Recursively redact nested secret fields in diagnostics.
 - Always clear and cancel pending command futures after send errors or cancellation.
+- Accept a command response that reports the requested signal value even when
+  firmware omits `uniq_id`; unrelated or stale values still time out.
 
 ## 0.4.1
 

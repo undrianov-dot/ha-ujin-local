@@ -1,3 +1,12 @@
+# v0.4.2 - reliable state and command reporting
+
+- Every UJIN device exposes a connection entity based on UDP heartbeat freshness.
+- Known sensor, thermostat and relay values remain visible during UDP outages;
+  stale packets are not used as false command confirmations.
+- Commands are confirmed by `uniq_id` or an actual state transition in telemetry.
+- Device management-port changes are persisted immediately.
+- Nested secret fields are removed from diagnostics.
+
 # v0.4.0 - thermostat measurements and reliable local commands
 
 - Thermostat setpoints use a 1 °C step in HA and outgoing commands. Fractional
@@ -19,8 +28,9 @@
   mesh node forwards telemetry. Serial numbers above 2^31 remain unsigned.
 - ACK identifiers are recognized at all supported envelope levels. Cancelled
   or failed sends no longer leave a thermostat blocked by a pending command.
-- Curated readings are cached across HA restarts. Devices with no telemetry
-  for five minutes become unavailable instead of looking permanently online.
+- Curated readings are cached across HA restarts. Known values remain visible
+  during UDP outages; the connection entity reports heartbeat freshness
+  separately.
 
 ## Verification and limitations
 

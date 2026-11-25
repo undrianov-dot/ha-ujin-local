@@ -37,6 +37,8 @@ jobs:
           python-version: "3.13"
       - name: Run protocol tests
         run: python -m unittest discover -s tests -v
+      - name: Compile Python
+        run: python -m compileall -q custom_components tests
 
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
