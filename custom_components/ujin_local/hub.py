@@ -37,6 +37,15 @@ from .const import (
 from .protocol import ParsedPacket, build_management_command, command_endpoint, is_recent, parse_packet
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _normalize_signal_name(key: str) -> str:
+    return key.lower().replace("-", "").replace("_", "").replace(" ", "")
+
+
+_TARGET_TEMPERATURE_SIGNAL_NAMES = frozenset(
+    _normalize_signal_name(key) for key in TARGET_TEMPERATURE_KEYS
+)
 _CRITICAL_SIGNALS = frozenset(
     (*TARGET_TEMPERATURE_KEYS, *HEAT_RELAY_KEYS, *LEAK_KEYS, *VALVE_KEYS,
      *RELAY_KEYS, *RELAY_INPUT_KEYS, "kid-bl", "br-lcd",
@@ -72,7 +81,7 @@ class UjinDevice:
 
     @staticmethod
     def _normalize_signal_name(key: str) -> str:
-        return key.lower().replace("-", "").replace("_", "").replace(" ", "")
+        return _normalize_signal_name(key)
 
     def first_signal(self, keys: tuple[str, ...]) -> tuple[str | None, Any]:
         normalized_keys = {
@@ -86,9 +95,6 @@ class UjinDevice:
         return None, None
 
 
-_MISSING = object()
-
-
 def _command_state_confirmed(
     signals: dict[str, Any],
     changes: dict[str, Any],
@@ -97,27 +103,37 @@ def _command_state_confirmed(
     """Return whether telemetry confirms a real state transition or unchanged target."""
     if not changes:
         return False
-    normalized = {
+    normalized_signals = {
         UjinDevice._normalize_signal_name(key): value
         for key, value in signals.items()
         if isinstance(key, str)
     }
-    previous = {
+    normalized_previous = {
         UjinDevice._normalize_signal_name(key): value
         for key, value in previous_signals.items()
         if isinstance(key, str)
     }
     for key, expected in changes.items():
         normalized_key = UjinDevice._normalize_signal_name(key)
-        actual = normalized.get(normalized_key, _MISSING)
-        before = previous.get(normalized_key, _MISSING)
-        if actual is _MISSING or not _values_match(expected, actual):
+        equivalent_keys = (
+            _TARGET_TEMPERATURE_SIGNAL_NAMES
+            if normalized_key in _TARGET_TEMPERATURE_SIGNAL_NAMES
+            else {normalized_key}
+        )
+        actual_values = [
+            value
+            for name, value in normalized_signals.items()
+            if name in equivalent_keys
+        ]
+        if not any(_values_match(expected, actual) for actual in actual_values):
             return False
-        if before is not _MISSING:
-            if _values_match(before, expected):
-                continue
-            if _values_match(before, actual):
-                return False
+        previous_values = [
+            value
+            for name, value in normalized_previous.items()
+            if name in equivalent_keys
+        ]
+        if any(_values_match(expected, before) for before in previous_values):
+            continue
     return True
 
 
